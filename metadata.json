@@ -1,0 +1,6 @@
+{
+  "name": "HR Dashboard and Management System",
+  "description": "Premium HR Management Dashboard with analytics, employee registry, payroll slips processing, leave logs, and detailed profile permissions management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "sapphire_hr_state": {
+      "title": "Sapphire HR Cloud Data State",
+      "description": "Global storage unit for syncing state data",
+      "type": "object",
+      "properties": {
+        "updatedAt": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "updatedAt",
+        "payload"
+      ]
+    }
+  },
+  "firestore": {
+    "/sapphire_hr/{documentId}": {
+      "schema": "sapphire_hr_state",
+      "description": "Synchronized collection of all application modules"
+    }
+  }
+}
