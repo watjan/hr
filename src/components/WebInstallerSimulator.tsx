@@ -487,10 +487,10 @@ try {
                 <div className="flex justify-between pt-6 border-t border-slate-900">
                   <button
                     onClick={() => setStep(1)}
-                    className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 text-xs font-bold hover:text-white hover:bg-slate-900 flex items-center gap-1 transition-all cursor-pointer"
+                    className="px-4 py-2 rounded-xl border border-rose-900/60 text-rose-400 text-xs font-bold hover:text-white hover:bg-rose-950/40 flex items-center gap-1 transition-all cursor-pointer"
                   >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>ย้อนกลับ</span>
+                    <ArrowLeft className="w-4 h-4 text-rose-500" />
+                    <span>ยกเลิก / ย้อนกลับ</span>
                   </button>
 
                   <button
@@ -644,10 +644,10 @@ try {
                 <div className="flex justify-between pt-6 border-t border-slate-900">
                   <button
                     onClick={() => setStep(2)}
-                    className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 text-xs font-bold hover:text-white hover:bg-slate-900 flex items-center gap-1 transition-all cursor-pointer"
+                    className="px-4 py-2 rounded-xl border border-rose-900/60 text-rose-400 text-xs font-bold hover:text-white hover:bg-rose-950/40 flex items-center gap-1 transition-all cursor-pointer"
                   >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>ย้อนกลับ</span>
+                    <ArrowLeft className="w-4 h-4 text-rose-500" />
+                    <span>ยกเลิก / ย้อนกลับ</span>
                   </button>
 
                   <button
@@ -735,10 +735,10 @@ try {
                   <button
                     onClick={() => setStep(3)}
                     disabled={isInstalling}
-                    className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 text-xs font-bold hover:text-white hover:bg-slate-900 flex items-center gap-1 transition-all cursor-pointer disabled:opacity-30 disabled:pointer-events-none"
+                    className="px-4 py-2 rounded-xl border border-rose-900/60 text-rose-400 text-xs font-bold hover:text-white hover:bg-rose-950/40 flex items-center gap-1 transition-all cursor-pointer disabled:opacity-30 disabled:pointer-events-none"
                   >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>ย้อนกลับ</span>
+                    <ArrowLeft className="w-4 h-4 text-rose-500" />
+                    <span>ยกเลิก / ย้อนกลับ</span>
                   </button>
                   <span className="text-[10px] text-slate-500 font-mono self-center">
                     ระบบจำลองเซิร์ฟเวอร์เสมือน - ตรวจเช็คโครงสร้าง SQLite/MySQL
