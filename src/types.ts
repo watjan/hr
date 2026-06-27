@@ -157,6 +157,34 @@ export interface DailyCashLog {
   note?: string; // หมายเหตุ
 }
 
+export interface SupplierPartner {
+  id: string; // e.g., "SPL-001"
+  name: string; // ชื่อคู่ค้า / บริษัทคู่ค้า
+  contactName?: string; // ผู้ติดต่อประสานงาน
+  phone?: string; // เบอร์โทรศัพท์
+  email?: string; // อีเมล
+  address?: string; // ที่อยู่
+  productCategory: string; // หมวดหมู่สินค้าที่จัดส่ง (เช่น "สแตนเลสสตีล", "แก๊สหุงต้ม", "บรรจุภัณฑ์", "เครื่องครัวนำเข้า", "บริการขนส่ง/โลจิสติกส์")
+  deliveryStatus: 'active' | 'inactive'; // สถานะคู่ค้า (กำลังส่งของ / ระงับชั่วคราว)
+  rating: number; // คะแนนประเมินคู่ค้า (1-5 ดาว)
+  paymentTerms?: string; // เงื่อนไขชำระเงิน (เช่น "เครดิต 30 วัน", "เงินสด", "มัดจำ 50%")
+  totalDeliveriesCount: number; // จำนวนรอบส่งของสะสม
+  outstandingBalance?: number; // ยอดเงินคงค้างค่ายกยอด/ค่าสินค้า
+  lastDeliveryDate?: string; // วันที่ส่งของล่าสุด (YYYY-MM-DD)
+}
+
+export interface DeliveryLog {
+  id: string; // "DLV-001"
+  supplierId: string; // ไอดีคู่ค้า
+  supplierName: string; // ชื่อคู่ค้า
+  deliveryDate: string; // วันที่ส่งของ (YYYY-MM-DD)
+  billNo?: string; // เลขที่ใบส่งของ/ใบกำกับภาษี
+  amount: number; // ยอดเงินตามบิลจัดส่ง
+  deliveryStatus: 'delivered' | 'pending' | 'shipping' | 'delayed' | 'cancelled'; // สถานะส่งของ ('ส่งสำเร็จแล้ว' | 'รอคิวส่ง' | 'กำลังจัดส่ง' | 'จัดส่งล่าช้า' | 'ยกเลิก')
+  receiverName: string; // พนักงานผู้รับของ
+  note?: string; // หมายเหตุเพิ่มเติม
+}
+
 
 
 

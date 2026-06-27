@@ -36,7 +36,8 @@ import {
   FileText,
   FileSpreadsheet,
   UserCheck,
-  ExternalLink
+  ExternalLink,
+  Truck
 } from 'lucide-react';
 
 // Types and mock data
@@ -67,6 +68,7 @@ import DailyCashLogView from './components/DailyCashLogView';
 import AccountingTaxView from './components/AccountingTaxView';
 import SalesBillingView from './components/SalesBillingView';
 import WebInstallerSimulator from './components/WebInstallerSimulator';
+import SuppliersView from './components/SuppliersView';
 import { 
   testConnection, 
   saveKeyToCloud, 
@@ -926,6 +928,11 @@ export default function App() {
     if (targetTab === 'sales-billing') {
       return session.role === 'admin' || session.role === 'sales' || session.role === 'accountant';
     }
+
+    // Allow suppliers for admin, sales, accountant
+    if (targetTab === 'suppliers') {
+      return session.role === 'admin' || session.role === 'sales' || session.role === 'accountant';
+    }
     
     // Access permission matrix
     const saved = localStorage.getItem('sapphire_role_permissions');
@@ -1235,6 +1242,24 @@ export default function App() {
               )}
             </AnimatePresence>
           </div>
+          )}
+
+          {/* Item 6.1: Delivery & Suppliers Directory */}
+          {isTabAllowed('suppliers') && (
+            <div className="border-t border-white/5 pt-2 mt-2">
+              <button
+                id="tab-suppliers-btn"
+                onClick={() => setActiveTab('suppliers')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+                  activeTab === 'suppliers'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Truck className="w-4.5 h-4.5 text-blue-400" />
+                <span>6.1 ระบบจัดการคู่ค้าส่งของ</span>
+              </button>
+            </div>
           )}
 
           {/* Foldable Accounting Navigation Tab */}
@@ -1804,6 +1829,18 @@ export default function App() {
               </div>
             )}
 
+            {/* Mobile Suppliers & Delivery log tab */}
+            {isTabAllowed('suppliers') && (
+              <div className="pt-2 border-t border-white/10 mt-1">
+                <button
+                  onClick={() => { setActiveTab('suppliers'); setIsMobileMenuOpen(false); }}
+                  className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold text-white ${activeTab === 'suppliers' ? 'bg-blue-600' : 'bg-white/5'}`}
+                >
+                  <Truck className="w-4 h-4 text-blue-400" /> 6.1 ระบบจัดการคู่ค้าส่งของ
+                </button>
+              </div>
+            )}
+
             {/* Mobile Users & Roles tab */}
             {isTabAllowed('users') && (
               <div className="pt-2 border-t border-white/10 mt-1">
@@ -1957,6 +1994,7 @@ export default function App() {
                   {activeTab === 'cheque-outgoing' && 'ระบบจ่ายตราสารและหนังสือแลกเงิน (เช็คขาจ่าย - Outgoing Cheques)'}
                   {activeTab === 'cheque-payees' && 'ฐานข้อมูลผู้รับเงิน/ซัพพลายเออร์ (เช็คขาจ่าย) (Suppliers / Payees Directory)'}
                   {activeTab === 'users' && 'ทะเบียนบริหารจัดการบัญชีผู้ใช้งาน (User Accounts Control Panel)'}
+                  {activeTab === 'suppliers' && 'ระบบบริหารจัดการฐานข้อมูลคู่ค้าและประวัติการส่งของ (Suppliers & Delivery Partners)'}
                   {activeTab === 'system-installer' && 'โปรแกรมจำลองการตั้งค่าโครงสร้างและติดตั้งระบบ (Web Setup Installer Simulator)'}
                   {activeTab === 'report-sales-monthly' && 'บริหารรวมรายงานทั้งหมด: รายงานสรุปยอดขายรายเดือนสุทธิสะสม (Consolidated Monthly Sales)'}
                   {activeTab === 'report-sales-yearly' && 'บริหารรวมรายงานทั้งหมด: รายงานสรุปยอดขายรายปีอ้างอิงเป้าหมาย (Consolidated Yearly Sales)'}
@@ -2596,6 +2634,18 @@ export default function App() {
                         currentSessionUsername={session.username} 
                         currentSessionRole={session.role} 
                       />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'suppliers' && (
+                    <motion.div
+                      key="suppliers-view"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <SuppliersView employees={employees} />
                     </motion.div>
                   )}
 
