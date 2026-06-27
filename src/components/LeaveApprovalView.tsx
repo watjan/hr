@@ -42,7 +42,7 @@ export default function LeaveApprovalView({
   onUpdateLeave
 }: LeaveApprovalViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'cancelled'>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
   const [managerNotes, setManagerNotes] = useState('');
@@ -55,7 +55,7 @@ export default function LeaveApprovalView({
   const [editEndDate, setEditEndDate] = useState('');
   const [editDuration, setEditDuration] = useState(1);
   const [editReason, setEditReason] = useState('');
-  const [editStatus, setEditStatus] = useState<'approved' | 'pending' | 'rejected'>('pending');
+  const [editStatus, setEditStatus] = useState<'approved' | 'pending' | 'rejected' | 'cancelled'>('pending');
 
   React.useEffect(() => {
     if (editStartDate && editEndDate) {
@@ -366,6 +366,12 @@ export default function LeaveApprovalView({
               >
                 ไม่อนุมัติ
               </button>
+              <button
+                onClick={() => setStatusFilter('cancelled')}
+                className={`px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${statusFilter === 'cancelled' ? 'bg-slate-500 text-white shadow-3xs' : 'hover:bg-slate-150'}`}
+              >
+                ยกเลิกแล้ว
+              </button>
             </div>
 
             {/* Filter Leave Type */}
@@ -448,6 +454,11 @@ export default function LeaveApprovalView({
                           <Clock className="w-3.5 h-3.5" /> รอการตัดสินใจ
                         </span>
                       )}
+                      {req.status === 'cancelled' && (
+                        <span className="bg-slate-550/10 text-slate-500 border border-slate-200 text-[10px] px-2.5 py-1 rounded-full font-bold inline-flex items-center gap-1.5">
+                          <XCircle className="w-3.5 h-3.5" /> ยกเลิกแล้ว
+                        </span>
+                      )}
                     </td>
                     <td className="p-4">
                       <div className="flex items-center justify-center gap-1.5">
@@ -467,6 +478,19 @@ export default function LeaveApprovalView({
                             </button>
                             {onUpdateLeave && (
                               <button
+                                onClick={() => {
+                                  if (confirm('❔ แอดมินต้องการยกเลิกคำขอลาของพนักงานท่านนี้ใช่หรือไม่?')) {
+                                    onUpdateLeave({ ...req, status: 'cancelled' as const });
+                                  }
+                                }}
+                                className="bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 font-extrabold px-2.5 py-1 rounded-lg text-[11px] transition-colors cursor-pointer"
+                                title="แอดมินยกเลิกคำขอลาแทนพนักงาน"
+                              >
+                                ยกเลิกคำขอ
+                              </button>
+                            )}
+                            {onUpdateLeave && (
+                              <button
                                 onClick={() => handleStartEdit(req)}
                                 className="text-indigo-600 hover:text-indigo-755 bg-indigo-50 hover:bg-indigo-100 px-2 py-1.5 rounded-lg text-[10.5px] font-black transition-colors border border-indigo-200 cursor-pointer flex items-center gap-1"
                                 title="แก้ไขรายละเอียดหรือสถานะคำร้องขอลา"
@@ -477,6 +501,19 @@ export default function LeaveApprovalView({
                           </>
                         ) : (
                           <div className="flex items-center gap-1.5">
+                            {onUpdateLeave && req.status !== 'cancelled' && (
+                              <button
+                                onClick={() => {
+                                  if (confirm('❔ แอดมินต้องการยกเลิกคำขอลาของพนักงานท่านนี้ใช่หรือไม่?')) {
+                                    onUpdateLeave({ ...req, status: 'cancelled' as const });
+                                  }
+                                }}
+                                className="bg-rose-50 hover:bg-rose-150 text-rose-600 border border-rose-150 font-bold px-2 py-1 rounded-lg text-[11px] transition-colors cursor-pointer"
+                                title="แอดมินยกเลิกคำขอลาแทนพนักงาน"
+                              >
+                                🚫 ยกเลิกคำขอ
+                              </button>
+                            )}
                             {onUpdateLeave && (
                               <button
                                 onClick={() => handleStartEdit(req)}
@@ -651,6 +688,7 @@ export default function LeaveApprovalView({
                       <option value="pending">⏳ รอการพิจารณาอนุมัติ (Pending)</option>
                       <option value="approved">✅ อนุมัติผู้ลาพักทันที (Approved)</option>
                       <option value="rejected">❌ ระงับ/ปฏิเสธคำร้องใบคำขอ (Rejected)</option>
+                      <option value="cancelled">🚫 ยกเลิกคำขอ (Cancelled)</option>
                     </select>
                   </div>
                 </div>

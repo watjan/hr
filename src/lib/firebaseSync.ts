@@ -227,7 +227,9 @@ export async function uploadAllToCloud(): Promise<void> {
     { localKey: 'hr_cheques_data', cloudKey: 'cheques_data' },
     { localKey: 'sapphire_payroll_registries', cloudKey: 'payroll_registries' },
     { localKey: 'hr_cheque_payers', cloudKey: 'cheque_payers' },
-    { localKey: 'hr_cheque_payees', cloudKey: 'cheque_payees' }
+    { localKey: 'hr_cheque_payees', cloudKey: 'cheque_payees' },
+    { localKey: 'sapphire_sales_annual_target', cloudKey: 'sales_annual_target' },
+    { localKey: 'sapphire_billing_statements', cloudKey: 'billing_statements' }
   ];
 
   for (const item of syncKeys) {
@@ -248,29 +250,40 @@ export async function uploadAllToCloud(): Promise<void> {
  * Downloads all key datasets from Firestore and saves to local storage
  */
 export async function downloadAllFromCloud(): Promise<Record<string, any>> {
-  const syncKeys = [
-    { localKey: 'sapphire_users', cloudKey: 'users' },
-    { localKey: 'sapphire_role_permissions', cloudKey: 'role_permissions' },
-    { localKey: 'hr_company_settings', cloudKey: 'company_settings' },
-    { localKey: 'hr_employees', cloudKey: 'employees' },
-    { localKey: 'hr_leave_requests', cloudKey: 'leave_requests' },
-    { localKey: 'hr_daily_attendance', cloudKey: 'daily_attendance' },
-    { localKey: 'sapphire_daily_sales', cloudKey: 'daily_sales' },
-    { localKey: 'hr_cheques_data', cloudKey: 'cheques_data' },
-    { localKey: 'sapphire_payroll_registries', cloudKey: 'payroll_registries' },
-    { localKey: 'hr_cheque_payers', cloudKey: 'cheque_payers' },
-    { localKey: 'hr_cheque_payees', cloudKey: 'cheque_payees' }
-  ];
+  if (typeof window !== 'undefined') {
+    (window as any).__is_downloading_from_cloud = true;
+  }
+  try {
+    const syncKeys = [
+      { localKey: 'sapphire_users', cloudKey: 'users' },
+      { localKey: 'sapphire_role_permissions', cloudKey: 'role_permissions' },
+      { localKey: 'hr_company_settings', cloudKey: 'company_settings' },
+      { localKey: 'hr_employees', cloudKey: 'employees' },
+      { localKey: 'hr_leave_requests', cloudKey: 'leave_requests' },
+      { localKey: 'hr_daily_attendance', cloudKey: 'daily_attendance' },
+      { localKey: 'sapphire_daily_sales', cloudKey: 'daily_sales' },
+      { localKey: 'hr_cheques_data', cloudKey: 'cheques_data' },
+      { localKey: 'sapphire_payroll_registries', cloudKey: 'payroll_registries' },
+      { localKey: 'hr_cheque_payers', cloudKey: 'cheque_payers' },
+      { localKey: 'hr_cheque_payees', cloudKey: 'cheque_payees' },
+      { localKey: 'sapphire_sales_annual_target', cloudKey: 'sales_annual_target' },
+      { localKey: 'sapphire_billing_statements', cloudKey: 'billing_statements' }
+    ];
 
-  const downloadedData: Record<string, any> = {};
+    const downloadedData: Record<string, any> = {};
 
-  for (const item of syncKeys) {
-    const cloudVal = await fetchKeyFromCloud(item.cloudKey);
-    if (cloudVal !== null) {
-      downloadedData[item.localKey] = cloudVal;
-      localStorage.setItem(item.localKey, typeof cloudVal === 'object' ? JSON.stringify(cloudVal) : String(cloudVal));
+    for (const item of syncKeys) {
+      const cloudVal = await fetchKeyFromCloud(item.cloudKey);
+      if (cloudVal !== null) {
+        downloadedData[item.localKey] = cloudVal;
+        localStorage.setItem(item.localKey, typeof cloudVal === 'object' ? JSON.stringify(cloudVal) : String(cloudVal));
+      }
+    }
+
+    return downloadedData;
+  } finally {
+    if (typeof window !== 'undefined') {
+      (window as any).__is_downloading_from_cloud = false;
     }
   }
-
-  return downloadedData;
 }

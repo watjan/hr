@@ -14,22 +14,27 @@ import {
   CreditCard,
   Check,
   Smartphone,
-  Info
+  Info,
+  XCircle
 } from 'lucide-react';
-import { Cheque, LeaveRequest } from '../types';
+import { Cheque, LeaveRequest, EmployeeSalary } from '../types';
 
 interface ChequeNotificationsProps {
   cheques: Cheque[];
   leaveRequests?: LeaveRequest[];
+  employees?: EmployeeSalary[];
   onNavigate?: (tab: string, subTab?: string) => void;
   currentUserRole?: string;
+  onUpdateLeave?: (updatedReq: LeaveRequest) => void;
 }
 
 export default function ChequeNotifications({ 
   cheques, 
   leaveRequests = [], 
+  employees = [],
   onNavigate, 
-  currentUserRole 
+  currentUserRole,
+  onUpdateLeave
 }: ChequeNotificationsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [lineToken, setLineToken] = useState(() => localStorage.getItem('line_notify_token') || '');
@@ -79,9 +84,9 @@ export default function ChequeNotifications({
 
   const dueTomorrowCheques = criticalCheques.filter(ch => ch.info.category === 'tomorrow');
 
-  // Filter pending leave requests for administrators/HR to show in the universal bell
+  // Filter pending leave requests for administrators/HR to show in the universal bell (must have a valid employee in the system)
   const pendingLeaves = (currentUserRole === 'admin' || currentUserRole === 'hr')
-    ? leaveRequests.filter(req => req.status === 'pending')
+    ? leaveRequests.filter(req => req.status === 'pending' && employees.some(emp => emp.id === req.employeeId))
     : [];
 
   const totalNotificationsCount = criticalCheques.length + pendingLeaves.length;
@@ -181,6 +186,7 @@ export default function ChequeNotifications({
         setIsSendingTest(false);
         playNotiSound();
         setTimeout(() => setNotificationStatus(null), 4000);
+        window.dispatchEvent(new Event('sapphire_storage_updated'));
         return true;
       } else {
         const errText = await response.text();
@@ -204,6 +210,7 @@ export default function ChequeNotifications({
         setNotificationStatus('⚡ ส่งสำเร็จผ่าน Client Request (Opaque Bridge)');
         setIsSendingTest(false);
         setTimeout(() => setNotificationStatus(null), 4000);
+        window.dispatchEvent(new Event('sapphire_storage_updated'));
         return true;
       } catch (innerErr) {
         setNotificationStatus(`❌ เกิดข้อผิดพลาดเชื่อมต่อ: โทเคนไม่ถูกต้อง หรือติดปัญหา CORS`);
@@ -491,9 +498,51 @@ export default function ChequeNotifications({
                                 <p className="text-[10px] text-zinc-500 italic font-semibold truncate">
                                   "{req.reason}"
                                 </p>
-                                <div className="pt-1 text-[9px] font-black text-amber-800 flex justify-between items-center">
-                                  <span>เริ่มลา: {req.startDate}</span>
-                                  <span className="text-indigo-600 hover:underline flex items-center gap-0.5">กดอนุมัติการลา →</span>
+                                <div className="pt-2 flex flex-wrap items-center justify-between gap-1.5 border-t border-amber-100/30 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <span className="text-[9px] text-amber-900 font-bold">เริ่มลา: {req.startDate}</span>
+                                  <div className="flex items-center gap-1">
+                                    {onUpdateLeave && (
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`❔ ต้องการอนุมัติการลาของ ${req.employeeName} ใช่หรือไม่?`)) {
+                                            onUpdateLeave({ ...req, status: 'approved' as const });
+                                          }
+                                        }}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer shadow-3xs"
+                                        title="อนุมัติขอลาพักทันที"
+                                      >
+                                        อนุมัติ
+                                      </button>
+                                    )}
+                                    {onUpdateLeave && (
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`❔ ต้องการปฏิเสธการลาของ ${req.employeeName} ใช่หรือไม่?`)) {
+                                            onUpdateLeave({ ...req, status: 'rejected' as const });
+                                          }
+                                        }}
+                                        className="bg-rose-600 hover:bg-rose-700 text-white font-black px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer shadow-3xs"
+                                        title="ระงับ/ปฏิเสธคำร้องใบคำขอ"
+                                      >
+                                        ปฏิเสธ
+                                      </button>
+                                    )}
+                                    {onUpdateLeave && (
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`❔ ต้องการยกเลิกคำขอลาของ ${req.employeeName} ใช่หรือไม่?`)) {
+                                            onUpdateLeave({ ...req, status: 'cancelled' as const });
+                                            setNotificationStatus('🚫 ยกเลิกคำขอเรียบร้อยแล้ว');
+                                            setTimeout(() => setNotificationStatus(null), 3500);
+                                          }
+                                        }}
+                                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-black px-1.5 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
+                                        title="ยกเลิกคำขอลา"
+                                      >
+                                        ยกเลิกคำขอ
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>

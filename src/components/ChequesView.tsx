@@ -176,6 +176,23 @@ export default function ChequesView({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [bankFilter, setBankFilter] = useState<string>('all');
+  const [monthFilter, setMonthFilter] = useState<string>('all');
+  const [yearFilter, setYearFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'number_asc' | 'number_desc' | 'date_desc' | 'date_asc'>('number_asc');
+  
+  // Pagination State for Outgoing Cheques Register
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  useEffect(() => {
+    setSortBy('number_asc');
+    setCurrentPage(1);
+    setMonthFilter('all');
+    setYearFilter('all');
+  }, [activeSubTab]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, bankFilter, monthFilter, yearFilter]);
 
   // Open modal for editing or adding
   const handleOpenModal = (cheque: Cheque | null = null) => {
@@ -399,6 +416,22 @@ export default function ChequesView({
 
   const dirList = activeSubTab === 'payers' ? payers : payees;
   const filteredDirList = activeSubTab === 'payers' ? displayPayers : displayPayees;
+
+  // Helper to get the lowest cheque number for a party to sort directories
+  const getLowestChequeNumber = (partyName: string, type: 'incoming' | 'outgoing') => {
+    const partyChs = cheques.filter(ch => ch.partyName === partyName && ch.type === type);
+    if (partyChs.length === 0) return 'ZZZZZZZZZZZZZ'; // Sort contacts with no cheques to the bottom
+    const sortedChs = [...partyChs].sort((a, b) => a.chequeNumber.localeCompare(b.chequeNumber, undefined, { numeric: true, sensitivity: 'base' }));
+    return sortedChs[0].chequeNumber;
+  };
+
+  const sortedFilteredDirList = [...filteredDirList].sort((a, b) => {
+    const type = activeSubTab === 'payers' ? 'incoming' : 'outgoing';
+    const aVal = getLowestChequeNumber(a.name, type);
+    const bVal = getLowestChequeNumber(b.name, type);
+    return aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
   const dirCheques = cheques.filter(ch => ch.type === (activeSubTab === 'payers' ? 'incoming' : 'outgoing'));
   const totalDirChequesValue = dirCheques.reduce((sum, ch) => sum + ch.amount, 0);
   const dirAverageChequeValue = dirCheques.length > 0 ? (totalDirChequesValue / dirCheques.length) : 0;
@@ -422,8 +455,27 @@ export default function ChequesView({
   // Distinct banks list for filtering
   const distinctBanks = Array.from(new Set(filteredByTypeCheques.map(ch => ch.bankName)));
 
+  // Distinct years list for filtering
+  const distinctYears = Array.from(new Set(filteredByTypeCheques.map(ch => ch.chequeDate ? ch.chequeDate.split('-')[0] : ''))).filter(Boolean).sort().reverse();
+
+  // Thai months options
+  const THAI_MONTH_OPTS = [
+    { value: '01', label: 'มกราคม (Jan)' },
+    { value: '02', label: 'กุมภาพันธ์ (Feb)' },
+    { value: '03', label: 'มีนาคม (Mar)' },
+    { value: '04', label: 'เมษายน (Apr)' },
+    { value: '05', label: 'พฤษภาคม (May)' },
+    { value: '06', label: 'มิถุนายน (Jun)' },
+    { value: '07', label: 'กรกฎาคม (Jul)' },
+    { value: '08', label: 'สิงหาคม (Aug)' },
+    { value: '09', label: 'กันยายน (Sept)' },
+    { value: '10', label: 'ตุลาคม (Oct)' },
+    { value: '11', label: 'พฤศจิกายน (Nov)' },
+    { value: '12', label: 'ธันวาคม (Dec)' }
+  ];
+
   // Display filter logic
-  const displayCheques = filteredByTypeCheques.filter(ch => {
+  const filteredDisplayCheques = filteredByTypeCheques.filter(ch => {
     // Search filter
     const matchesSearch = 
       ch.chequeNumber.includes(searchQuery) || 
@@ -442,8 +494,36 @@ export default function ChequesView({
     // Bank filter
     const matchesBank = bankFilter === 'all' ? true : ch.bankName === bankFilter;
 
-    return matchesSearch && matchesStatus && matchesBank;
+    // Month & Year filter
+    const dateParts = ch.chequeDate ? ch.chequeDate.split('-') : [];
+    const matchesMonth = monthFilter === 'all' ? true : dateParts[1] === monthFilter;
+    const matchesYear = yearFilter === 'all' ? true : dateParts[0] === yearFilter;
+
+    return matchesSearch && matchesStatus && matchesBank && matchesMonth && matchesYear;
   });
+
+  // Display sorted cheques based on selected option
+  const displayCheques = [...filteredDisplayCheques].sort((a, b) => {
+    if (sortBy === 'number_asc') {
+      return a.chequeNumber.localeCompare(b.chequeNumber, undefined, { numeric: true, sensitivity: 'base' });
+    } else if (sortBy === 'number_desc') {
+      return b.chequeNumber.localeCompare(a.chequeNumber, undefined, { numeric: true, sensitivity: 'base' });
+    } else if (sortBy === 'date_asc') {
+      return a.chequeDate.localeCompare(b.chequeDate);
+    } else { // 'date_desc'
+      return b.chequeDate.localeCompare(a.chequeDate);
+    }
+  });
+
+  // Pagination Constants for Outgoing Register
+  const itemsPerPage = 10;
+  const isPaginated = activeSubTab === 'outgoing' || activeSubTab === 'incoming';
+  const totalPages = Math.ceil(displayCheques.length / itemsPerPage);
+  
+  // Slice displayCheques for mapping
+  const paginatedCheques = isPaginated
+    ? displayCheques.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+    : displayCheques;
 
   // Helper labels and colors
   const getStatusBadge = (status: Cheque['status']) => {
@@ -651,18 +731,56 @@ export default function ChequesView({
 
             {!isDirectoryTab && (
               <>
-                {/* Quick status filter select */}
+                {/* Quick Status Buttons "จ่ายแล้ว - ยังไม่จ่าย" */}
+                <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('all')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      statusFilter === 'all'
+                        ? 'bg-white text-slate-800 shadow-xs font-black'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    ทั้งหมด
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('cleared')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      statusFilter === 'cleared'
+                        ? 'bg-emerald-600 text-white shadow-xs font-black'
+                        : 'text-slate-550 hover:text-emerald-600 hover:bg-white/40'
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === 'cleared' ? 'bg-white' : 'bg-emerald-500'}`} />
+                    จ่ายแล้ว
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('pending')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      statusFilter === 'pending'
+                        ? 'bg-amber-500 text-white shadow-xs font-black'
+                        : 'text-slate-550 hover:text-amber-600 hover:bg-white/40'
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === 'pending' ? 'bg-white' : 'bg-amber-500'}`} />
+                    ยังไม่จ่าย
+                  </button>
+                </div>
+
+                {/* Sort Option Dropdown for Cheque Numbers and Dates */}
                 <div className="relative w-full sm:w-48">
                   <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="pl-3 pr-8 py-2 w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white text-slate-800 appearance-none"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as any)}
+                    className="pl-3 pr-8 py-2 w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white text-slate-800 appearance-none font-sans"
                   >
-                    <option value="all">กรองตามทุกสถานะเช็ค</option>
-                    <option value="cleared">เช็คผ่านแล้ว / เข้าบัญชีแล้ว</option>
-                    <option value="pending">ค้างรับ/ค้างจ่าย/รอเบิกขึ้นเงิน</option>
-                    <option value="bounced">เช็คเด้ง / มีปัญหาสั่งจ่าย</option>
-                    <option value="cancelled">เช็คยกเลิก</option>
+                    <option value="number_asc">🔢 ตามเลขเช็ค (น้อย-มาก)</option>
+                    <option value="number_desc">🔢 ตามเลขเช็ค (มาก-น้อย)</option>
+                    <option value="date_desc">📅 วันที่พึงรับจ่าย (ล่าสุด-เก่าสุด)</option>
+                    <option value="date_asc">📅 วันที่พึงรับจ่าย (เก่าสุด-ล่าสุด)</option>
                   </select>
                   <span className="absolute right-3.5 top-3.5 text-[8px] pointer-events-none text-slate-500">▼</span>
                 </div>
@@ -677,6 +795,36 @@ export default function ChequesView({
                     <option value="all">ทุกธนาคารสั่งจ่าย</option>
                     {distinctBanks.map((b, idx) => (
                       <option key={idx} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3.5 top-3.5 text-[8px] pointer-events-none text-slate-500">▼</span>
+                </div>
+
+                {/* Month Filter Select */}
+                <div className="relative w-full sm:w-36">
+                  <select
+                    value={monthFilter}
+                    onChange={(e) => setMonthFilter(e.target.value)}
+                    className="pl-3 pr-8 py-2 w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white text-slate-800 appearance-none"
+                  >
+                    <option value="all">🗓️ ทุกเดือน</option>
+                    {THAI_MONTH_OPTS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3.5 top-3.5 text-[8px] pointer-events-none text-slate-500">▼</span>
+                </div>
+
+                {/* Year Filter Select */}
+                <div className="relative w-full sm:w-32">
+                  <select
+                    value={yearFilter}
+                    onChange={(e) => setYearFilter(e.target.value)}
+                    className="pl-3 pr-8 py-2 w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white text-slate-800 appearance-none"
+                  >
+                    <option value="all">📅 ทุกปี</option>
+                    {distinctYears.map((y) => (
+                      <option key={y} value={y}>ปี {y} (พ.ศ. {parseInt(y) + 543})</option>
                     ))}
                   </select>
                   <span className="absolute right-3.5 top-3.5 text-[8px] pointer-events-none text-slate-500">▼</span>
@@ -746,9 +894,11 @@ export default function ChequesView({
                     <th className="py-3 px-4 text-right">จัดการ</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-705">
-                  {filteredDirList.map((party) => {
-                    const partyCheques = cheques.filter(ch => ch.partyName === party.name && ch.type === (activeSubTab === 'payers' ? 'incoming' : 'outgoing'));
+                <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                  {sortedFilteredDirList.map((party) => {
+                    const partyCheques = cheques
+                      .filter(ch => ch.partyName === party.name && ch.type === (activeSubTab === 'payers' ? 'incoming' : 'outgoing'))
+                      .sort((a, b) => a.chequeNumber.localeCompare(b.chequeNumber, undefined, { numeric: true, sensitivity: 'base' }));
                     const sumAmount = partyCheques.reduce((sum, ch) => sum + ch.amount, 0);
                     const isExpanded = expandedPartyId === party.id;
                     
@@ -765,7 +915,14 @@ export default function ChequesView({
                               </div>
                               <div>
                                 <strong className="text-slate-900 font-extrabold text-xs block">{party.name}</strong>
-                                <span className="text-[10px] text-slate-400 font-bold font-mono">ID: {party.id}</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] text-slate-400 font-bold font-mono">ID: {party.id}</span>
+                                  {partyCheques.length > 0 && (
+                                    <span className="text-[9px] text-indigo-600 bg-indigo-50 border border-indigo-100 px-1 py-0.5 rounded font-mono font-black">
+                                      เช็คแรก: #{partyCheques[0].chequeNumber}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -905,13 +1062,41 @@ export default function ChequesView({
               <p className="text-[11px] text-slate-400">ทดลองสลับฟิลเตอร์หรือกดเพิ่มการลงทะเบียนเช็คใหม่ในระบบ</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100 text-[10px] text-slate-500 uppercase tracking-widest font-black select-none">
-                    <th className="py-3 px-4">เลขที่เช็ค / ธนาคาร</th>
+                    <th className="py-3 px-4 text-center w-12 shrink-0">ลำดับ</th>
+                    <th 
+                      className="py-3 px-4 cursor-pointer hover:bg-slate-100/85 transition-colors group"
+                      onClick={() => {
+                        setSortBy(prev => prev === 'number_asc' ? 'number_desc' : 'number_asc');
+                      }}
+                      title="คลิกเพื่อสลับการเรียงตามเลขที่เช็ค"
+                    >
+                      <div className="flex items-center gap-1.5 justify-start">
+                        <span>เลขที่เช็ค / ธนาคาร</span>
+                        <span className="text-slate-400 group-hover:text-blue-600 transition-colors text-[9px] font-mono leading-none">
+                          {sortBy === 'number_asc' ? '▲ (น้อย-มาก)' : sortBy === 'number_desc' ? '▼ (มาก-น้อย)' : '↕'}
+                        </span>
+                      </div>
+                    </th>
                     <th className="py-3 px-4">{activeSubTab === 'incoming' ? 'ชื่อลูกค้า (ผู้สั่งจ่าย)' : 'ชื่อคู่ค้า (ผู้รับเงิน)'}</th>
-                    <th className="py-3 px-4">วันครบกำหนด (บนเช็ค)</th>
+                    <th 
+                      className="py-3 px-4 cursor-pointer hover:bg-slate-100/85 transition-colors group"
+                      onClick={() => {
+                        setSortBy(prev => prev === 'date_asc' ? 'date_desc' : 'date_asc');
+                      }}
+                      title="คลิกเพื่อสลับการเรียงตามวันครบกำหนด"
+                    >
+                      <div className="flex items-center gap-1.5 justify-start">
+                        <span>วันครบกำหนด (บนเช็ค)</span>
+                        <span className="text-slate-400 group-hover:text-blue-600 transition-colors text-[9px] font-mono leading-none">
+                          {sortBy === 'date_asc' ? '▲ (เก่า-ใหม่)' : sortBy === 'date_desc' ? '▼ (ใหม่-เก่า)' : '↕'}
+                        </span>
+                      </div>
+                    </th>
                     <th className="py-3 px-4 text-right">จำนวนเงินสุทธิ</th>
                     <th className="py-3 px-4 text-center">สถานะเช็ค</th>
                     <th className="py-3 px-4 text-center">ทางเลือกด่วน</th>
@@ -919,10 +1104,13 @@ export default function ChequesView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
-                  {displayCheques.map((item, idx) => {
+                  {paginatedCheques.map((item, idx) => {
                     const badgeInfo = getStatusBadge(item.status);
                     return (
                       <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-4 text-center font-mono font-bold text-slate-400 select-none bg-slate-50/20 w-12">
+                          {(currentPage - 1) * itemsPerPage + idx + 1}
+                        </td>
                         <td className="py-3 px-4 space-y-1">
                           <div className="flex items-center gap-1.5">
                             <Building className="w-4 h-4 text-slate-400 shrink-0" />
@@ -963,33 +1151,33 @@ export default function ChequesView({
                           <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-xs gap-0.5">
                             <button
                               onClick={() => handleUpdateStatusQuickly(item.id, 'cleared')}
-                              title="ทำเครื่องหมาย: ขึ้นเงินสำเร็จแล้ว"
-                              className={`px-1.5 py-1 text-[9px] rounded-sm font-bold transition-all cursor-pointer ${
+                              title={activeSubTab === 'incoming' ? "ทำเครื่องหมาย: เคลียร์/รับเงินจริงแล้ว" : "ทำเครื่องหมาย: หักยอดจ่ายจริงแล้ว"}
+                              className={`px-2 py-1 text-[10px] rounded-md font-bold transition-all cursor-pointer ${
                                 item.status === 'cleared'
                                   ? 'bg-emerald-600 text-white font-black'
-                                  : 'text-slate-400 hover:text-emerald-600 hover:bg-slate-100'
+                                  : 'text-slate-500 hover:text-emerald-700 hover:bg-emerald-50'
                               }`}
                             >
-                              ผ่านแล้ว
+                              {activeSubTab === 'incoming' ? 'รับเงินแล้ว' : 'จ่ายแล้ว'}
                             </button>
                             <button
                               onClick={() => handleUpdateStatusQuickly(item.id, 'pending_deposit')}
-                              title="ทำเครื่องหมาย: ได้รับ/ออกเช็คแล้ว รอเบิกขึ้นเงิน"
-                              className={`px-1.5 py-1 text-[9px] rounded-sm font-bold transition-all cursor-pointer ${
-                                item.status === 'pending_deposit'
-                                  ? 'bg-blue-600 text-white font-black'
-                                  : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
+                              title={activeSubTab === 'incoming' ? "ทำเครื่องหมาย: ตราสารคงค้าง" : "ทำเครื่องหมาย: รอไปขึ้นตัดจ่าย"}
+                              className={`px-2 py-1 text-[10px] rounded-md font-bold transition-all cursor-pointer ${
+                                item.status === 'pending_deposit' || item.status === 'pending_receipt'
+                                  ? 'bg-amber-500 text-white font-black'
+                                  : 'text-slate-500 hover:text-amber-700 hover:bg-amber-50'
                               }`}
                             >
-                              รอเคลีย
+                              {activeSubTab === 'incoming' ? 'ค้างรับ' : 'ยังไม่จ่าย'}
                             </button>
                             <button
                               onClick={() => handleUpdateStatusQuickly(item.id, 'bounced')}
-                              title="ทำเครื่องหมาย: ตราสารมีปัญหา/เช็คเด้งกลับ"
-                              className={`px-1.5 py-1 text-[9px] rounded-sm font-bold transition-all cursor-pointer ${
+                              title="ทำเครื่องหมาย: เช็คเด้งมีปากเสียง"
+                              className={`px-2 py-1 text-[10px] rounded-md font-bold transition-all cursor-pointer ${
                                 item.status === 'bounced'
                                   ? 'bg-rose-600 text-white font-black animate-pulse'
-                                  : 'text-slate-400 hover:text-rose-600 hover:bg-slate-100'
+                                  : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
                               }`}
                             >
                               เด้ง
@@ -1021,8 +1209,98 @@ export default function ChequesView({
                 </tbody>
               </table>
             </div>
-          )
-        )}
+
+            {/* Premium Pagination Controls */}
+            {isPaginated && totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 bg-slate-50 border-t border-slate-100 font-sans select-none">
+                <div className="text-[11px] font-bold text-slate-500">
+                  แสดง <span className="font-extrabold text-slate-950 font-mono">{(currentPage - 1) * itemsPerPage + 1}</span> ถึง{" "}
+                  <span className="font-extrabold text-slate-950 font-mono">
+                    {Math.min(currentPage * itemsPerPage, displayCheques.length)}
+                  </span>{" "}
+                  จากทั้งหมด <span className="font-extrabold text-slate-950 font-mono">{displayCheques.length}</span> รายการ
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer"
+                  >
+                    ก่อนหน้า
+                  </button>
+                  {(() => {
+                    // Show a maximum of 5 page buttons with smart ellipses for superior UI
+                    const pageRange = [];
+                    const maxVisible = 5;
+                    let start = Math.max(1, currentPage - 2);
+                    let end = Math.min(totalPages, start + maxVisible - 1);
+                    if (end - start + 1 < maxVisible) {
+                      start = Math.max(1, end - maxVisible + 1);
+                    }
+                    for (let p = start; p <= end; p++) {
+                      pageRange.push(p);
+                    }
+                    return (
+                      <>
+                        {start > 1 && (
+                          <>
+                            <button
+                              onClick={() => setCurrentPage(1)}
+                              className={`h-7.5 min-w-[30px] px-1.5 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                                currentPage === 1
+                                  ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                                  : "border-transparent text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              1
+                            </button>
+                            {start > 2 && <span className="text-slate-350 text-[10px] px-0.5 select-none font-bold">...</span>}
+                          </>
+                        )}
+                        {pageRange.map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setCurrentPage(p)}
+                            className={`h-7.5 min-w-[30px] px-1.5 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                              currentPage === p
+                                ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                                : "border-transparent text-slate-600 hover:bg-slate-100 hover:border-slate-200"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                        {end < totalPages && (
+                          <>
+                            {end < totalPages - 1 && <span className="text-slate-350 text-[10px] px-0.5 select-none font-bold">...</span>}
+                            <button
+                              onClick={() => setCurrentPage(totalPages)}
+                              className={`h-7.5 min-w-[30px] px-1.5 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                                currentPage === totalPages
+                                  ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                                  : "border-transparent text-slate-600 hover:bg-slate-100 border-slate-200"
+                              }`}
+                            >
+                              {totalPages}
+                            </button>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer"
+                  >
+                    ถัดไป
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )
+      )}
       </div>
 
       {/* DETAILED ADD / EDIT CHEQUE POPUP MODAL DIALOG */}
@@ -1106,6 +1384,7 @@ export default function ChequesView({
                         <option value="ธนาคารกรุงศรีอยุธยา">ธนาคารกรุงศรีอยุธยา (BAY)</option>
                         <option value="ธนาคารทหารไทยธนชาต">ธนาคารทหารไทยธนชาต (ttb)</option>
                         <option value="ธนาคารออมสิน">ธนาคารออมสิน (GSB)</option>
+                        <option value="ธนาคารธ.ก.ส">ธนาคารธ.ก.ส (BAAC)</option>
                       </select>
                       <span className="absolute right-3 top-3 text-[10px] pointer-events-none text-slate-500">▼</span>
                     </div>

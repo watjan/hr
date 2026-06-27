@@ -34,6 +34,9 @@ export interface EmployeeSalary {
   createdAt?: string;
   avatar?: string;       // รูปโปรไฟล์พนักงาน (URL หรือ base64)
   startDate?: string;    // วันเริ่มเข้าทำงาน (รูปแบบ YYYY-MM-DD)
+  workedDays?: number;   // จำนวนวันทำงาน สำหรับพนักงานรายวัน
+  branch?: string;       // สาขา เช่น 'สำนักงานใหญ่', 'สาขาควนขนุน', 'สาขาพัทลุง'
+  cancelLineSend?: boolean; // ปิดการส่ง LINE สำหรับสลิปพนักงานท่านนี้ (ยกเลิกส่ง)
 }
 
 export interface LeaveRequest {
@@ -46,10 +49,17 @@ export interface LeaveRequest {
   durationDays: number; // For leave
   durationMinutes?: number; // For late
   reason: string;
-  status: 'approved' | 'pending' | 'rejected';
+  status: 'approved' | 'pending' | 'rejected' | 'cancelled';
 }
 
-export type AttendanceStatus = 'present' | 'leave' | 'late' | 'absent' | 'swap_holiday';
+export type AttendanceStatus = 'present' | 'leave' | 'late' | 'absent' | 'swap_holiday' | 'holiday';
+
+export interface CompanyHoliday {
+  id: string;
+  date: string; // YYYY-MM-DD
+  name: string; // ชื่อวันหยุด เช่น "วันขึ้นปีใหม่"
+  description?: string;
+}
 
 export interface DailyAttendance {
   id: string; // date_employeeId combination is perfect, or just auto id
@@ -131,6 +141,22 @@ export interface TestUser {
   color?: string;
   allowedTabs?: string[];
 }
+
+export interface DailyCashLog {
+  id: string;
+  date: string; // YYYY-MM-DD
+  sales1: number; // ยอดขายที่ 1
+  sales2: number; // ยอดขายที่ 2
+  reserve: number; // ยอดเตรียมเงิน (สำรองตั้งต้น)
+  transferKhonLaKhrueng: number; // โอนคนละครึ่ง
+  transferKBank: number; // โอนกสิกรไทย
+  transferSCB: number; // โอนไทยพาณิชย์
+  expense: number; // รายจ่ายวันนี้ / ยอดจ่ายเงิน
+  actualCashCounted: number; // ยอดนับได้จริง
+  creator: string; // ผู้บันทึก
+  note?: string; // หมายเหตุ
+}
+
 
 
 

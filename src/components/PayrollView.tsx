@@ -20,18 +20,11 @@ import {
   Scissors,
   Printer,
   FileText,
-  Share2,
   Copy,
   Check,
-  Send,
-  MessageSquare,
-  Settings,
-  ExternalLink,
-  Lock,
-  RefreshCw,
   ChevronDown
 } from 'lucide-react';
-import { EmployeeSalary, Department } from '../types';
+import { EmployeeSalary, Department, CompanySettings } from '../types';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -41,6 +34,7 @@ interface PayrollViewProps {
   onAddEmployee: (emp: EmployeeSalary) => void;
   onUpdateEmployee: (emp: EmployeeSalary) => void;
   onDeleteEmployee: (id: string) => void;
+  companySettings?: CompanySettings;
 }
 
 export interface RegistryRow {
@@ -69,7 +63,8 @@ export default function PayrollView({
   departments,
   onAddEmployee,
   onUpdateEmployee,
-  onDeleteEmployee
+  onDeleteEmployee,
+  companySettings
 }: PayrollViewProps) {
   
   // NEW: Wage Roster Collapsible and State Hub
@@ -118,138 +113,6 @@ export default function PayrollView({
     status: 'pending' | 'hold';
     employeeName: string;
   } | null>(null);
-
-  // LINE Notification and Web Sharing state (Custom Line message feature)
-  const [lineTemplate, setLineTemplate] = useState<'full' | 'summary' | 'kudos'>('full');
-  const [lineMessage, setLineMessage] = useState('');
-  const [lineToken, setLineToken] = useState(() => localStorage.getItem('sapphire_line_notify_token') || '');
-  const [showTokenConfig, setShowTokenConfig] = useState(false);
-  const [lineStatus, setLineStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
-  const [lineCopied, setLineCopied] = useState(false);
-  const [lineLogs, setLineLogs] = useState<string[]>([]);
-
-  // Function to dynamically build pre-formatted Line message
-  const getLineMessageLayout = (emp: EmployeeSalary, template: 'full' | 'summary' | 'kudos') => {
-    if (!emp) return '';
-    const dateObj = emp.createdAt ? new Date(emp.createdAt) : new Date();
-    const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-    const formattedMonth = thaiMonths[dateObj.getMonth()];
-    const thaiYear = dateObj.getFullYear() + 543;
-    const periodStr = `งวดที่ ${emp.paymentPeriod || '1'} (${formattedMonth} ${thaiYear})`;
-    const ssoAmt = emp.socialSecurity !== undefined ? emp.socialSecurity : Math.min(750, Math.round(emp.baseSalary * 0.05));
-    const netAmt = emp.baseSalary + (emp.bonus || 0) - (emp.deduction || 0) - ssoAmt;
-
-    if (template === 'summary') {
-      return [
-        `📢 แจ้งโอนเงินเดือน (Salary Payment Alert)`,
-        `🏢 บจก. อภิวัฒน์เครื่องครัว (Apiwat)`,
-        `👤 พนักงาน: คุณ ${emp.name}`,
-        `📅 งวดการจ่าย: ${periodStr}`,
-        `💰 ยอดสุทธิโอนเข้าบัญชี: ฿${netAmt.toLocaleString()} บาท`,
-        `🏦 บัญชี: ${emp.bankName || 'ธนาคารทั่วไป'} (*${emp.bankAccount ? emp.bankAccount.slice(-4) : 'xxxx'})`,
-        `📌 สถานะรายการ: ✅ โอนเงินสำเร็จแล้ว`,
-        `---------------------------------`,
-        `ท่านสามารถตรวจสอบยอดผ่าน Mobile Banking ได้โดยตรงค่ะ ขอบคุณค่ะ 🙏✨`
-      ].join('\n');
-    }
-
-    if (template === 'kudos') {
-      return [
-        `🌟 ข้อความชื่นชม & ขอขอบพระคุณพนักงาน`,
-        `🏢 บจก. อภิวัฒน์เครื่องครัว จำกัด`,
-        `👤 คุณ ${emp.name} (${emp.position})`,
-        `📅 ประจำรอบงวด: ${periodStr}`,
-        `🏆 ยอดเงินพิเศษ/รางวัล (Bonus): ฿${(emp.bonus || 0).toLocaleString()} บาท`,
-        `---------------------------------`,
-        `ขอชื่นชมในความตั้งใจทำงานและผลตอบหลังยอดเยี่ยมในฝ่ายผลิต/จัดเตรียมสินค้า บริษัทขอส่งมอบโบนัสและขอความขอบคุณอย่างสูงที่สู้ร่วมกัน ขอให้คงรักษามาตรฐานและความเพียรเช่นนี้สืบไป! 💙✨`
-      ].join('\n');
-    }
-
-    // Default 'full' template
-    return [
-      `📢 ใบแจ้งสลิปเงินเดือนแบบดิจิทัล (E-Payslip)`,
-      `🏢 บจก. อภิวัฒน์เครื่องครัว จำกัด`,
-      `👤 พนักงาน: คุณ ${emp.name} (${emp.position})`,
-      `🆔 รหัส: ${emp.employeeId}`,
-      `📅 ประจำ: ${periodStr}`,
-      `---------------------------------`,
-      `🟢 รายรับ (Earnings):`,
-      `  • เงินเดือนพื้นฐาน: ฿${emp.baseSalary.toLocaleString()}`,
-      `  • ยอดโบนัส/เงินพิเศษ: ฿${(emp.bonus || 0).toLocaleString()}`,
-      `🔴 รายจ่ายหัก (Deductions):`,
-      `  • หักประกันสังคม (SSO): -฿${ssoAmt.toLocaleString()}`,
-      `  • หักขาดงานอื่นๆ: -฿${(emp.deduction || 0).toLocaleString()}`,
-      `---------------------------------`,
-      `💵 ยอดเงินโอนสุทธิ (NET PAID): ฿${netAmt.toLocaleString()} บาท`,
-      `🏦 บัญชีปลายทาง: ${emp.bankName} - ${emp.bankAccount || 'xxxx'}`,
-      `---------------------------------`,
-      `สถานะ: ✅ โอนจ่ายเสร็จสิ้น (PAID)`,
-      `(สร้างรายงานอัตโนมัติเมื่อ: ${new Date().toLocaleDateString('th-TH')} เวลา ${new Date().toLocaleTimeString('th-TH')} น.)`
-    ].join('\n');
-  };
-
-  // Re-generate text whenever active employee or template choice changes
-  useEffect(() => {
-    if (activeSlipEmployee) {
-      setLineMessage(getLineMessageLayout(activeSlipEmployee, lineTemplate));
-      setLineStatus('idle');
-    }
-  }, [activeSlipEmployee, lineTemplate]);
-
-  // Share / Copy / Notify Handlers
-  const handleCopyLineMessage = () => {
-    navigator.clipboard.writeText(lineMessage);
-    setLineCopied(true);
-    setTimeout(() => setLineCopied(false), 2000);
-  };
-
-  const handleLineShareUrl = () => {
-    const lineUrl = `https://social-plugins.line.me/lineit/share?url=&text=${encodeURIComponent(lineMessage)}`;
-    window.open(lineUrl, '_blank');
-  };
-
-  const handleSendLineNotify = async () => {
-    if (!lineToken.trim()) {
-      setLineStatus('error');
-      setLineLogs([`❌ ล้มเหลว: กรุณากรอก LINE Notify Token (Personal Access Token) เพื่อระบุเกตเวย์ปลายทาง`]);
-      return;
-    }
-
-    setLineStatus('sending');
-    setLineLogs([
-      `🚀 Initializing Sapphire LINE API Agent...`,
-      `📡 การจำลองโอนรีเลย์ CORS-Bypass Proxy เพื่อป้องกันความลับ Token...`,
-      `🔑 กำลังยืนยันความถูกต้องของ Authorization Token: [Bearer ${lineToken.substring(0, 6)}...]`,
-    ]);
-
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    setLineLogs(prev => [
-      ...prev,
-      `📦 โครงสร้าง payload [multipart/form-data] จัดเตรียมเรียบร้อย`,
-      `📝 ข้อมูลที่จัดเตรียมส่ง:\n${lineMessage.substring(0, 150)}...\n(ความยาวข้อความรวม: ${lineMessage.length} ตัวอักษร)`
-    ]);
-
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Try a real network dispatch and explain CORS or handle success
-    setLineLogs(prev => [
-      ...prev,
-      `🌐 ทำการยิง API Request ไปยังปลายทาง https://notify-api.line.me/api/notify`,
-      `⚡ สถานะตอบรับจากเกตเวย์ LINE Server: 👍 HTTP 200 OK (Simulated Successful Broadcast)`,
-      `🎁 Response body: { "status": 200, "message": "ok" }`,
-      `🎉 ส่งข้อมูลแจ้งยอดเงินสะสม/เงินเดือน ของพนักงาน "${activeSlipEmployee?.name}" ไปยังไลน์ส่วนตัว/ไลน์กลุ่มสำเร็จแล้ว!`
-    ]);
-    setLineStatus('success');
-    localStorage.setItem('sapphire_line_notify_token', lineToken);
-  };
-
-  const handleResetLineNotify = () => {
-    setLineToken('');
-    localStorage.removeItem('sapphire_line_notify_token');
-    setLineStatus('idle');
-    setLineLogs([`🧹 ล้างประวัติการจำลอง และลบ LINE Notify Personal Token ถาวรแล้ว`]);
-  };
 
   // --- NEW: Wage Registry/Roster Methods & Helpers ---
   const currentPeriodKey = activeRegistryPeriod ? `${registryYear}_${registryMonth}_${activeRegistryPeriod}` : '';
@@ -321,6 +184,21 @@ export default function PayrollView({
     }
   }, [activeRegistryPeriod, registryMonth, registryYear, employees]);
 
+  useEffect(() => {
+    const handleSyncReset = () => {
+      const raw = localStorage.getItem('sapphire_payroll_registries');
+      try {
+        if (raw) {
+          setRegistryRowsMap(JSON.parse(raw));
+        }
+      } catch (e) {
+        console.error('Error reloading payroll registries', e);
+      }
+    };
+    window.addEventListener('sapphire_storage_updated', handleSyncReset);
+    return () => window.removeEventListener('sapphire_storage_updated', handleSyncReset);
+  }, []);
+
   const handleUpdateRowCell = (index: number, field: keyof RegistryRow, value: any) => {
     if (!activeRegistryPeriod) return;
     const key = `${registryYear}_${registryMonth}_${activeRegistryPeriod}`;
@@ -368,14 +246,27 @@ export default function PayrollView({
   const [autoSSO, setAutoSSO] = useState(true);
   const [paymentPeriodInput, setPaymentPeriodInput] = useState<'1' | '2'>('1');
   const [salaryTypeInput, setSalaryTypeInput] = useState<'monthly' | 'daily'>('monthly');
+  const [workedDaysInput, setWorkedDaysInput] = useState<number>(15);
   const [statusInput, setStatusInput] = useState<'paid' | 'pending' | 'hold'>('pending');
   const [bankNameInput, setBankNameInput] = useState('ธนาคารกสิกรไทย');
   const [bankAccountInput, setBankAccountInput] = useState('');
   const [createdAtInput, setCreatedAtInput] = useState(new Date().toISOString().substring(0, 10));
+  const [branchInput, setBranchInput] = useState('สำนักงานใหญ่');
+
+  // Helper helper to get base value (takes into account worked days if daily salary type)
+  const getEmpBaseVal = (emp: EmployeeSalary) => {
+    if (emp.salaryType === 'daily') {
+      const days = emp.workedDays !== undefined ? emp.workedDays : 15;
+      return emp.baseSalary * days;
+    }
+    return emp.baseSalary;
+  };
 
   // Helper helper to get SSO value dynamically (fallback is 5% capped at 750)
   const getEmpSSO = (emp: EmployeeSalary) => {
-    return emp.socialSecurity !== undefined ? emp.socialSecurity : Math.min(750, Math.round(emp.baseSalary * 0.05));
+    if (emp.socialSecurity !== undefined) return emp.socialSecurity;
+    const baseVal = getEmpBaseVal(emp);
+    return Math.min(750, Math.round(baseVal * 0.05));
   };
 
   // Helper to generate a pay slip document number: [งวด][เดือน][ปี][ลำดับ]
@@ -395,15 +286,16 @@ export default function PayrollView({
     return `${period}${monthStr}${yearStr}-${seqStr}`;
   };
 
-  // Synchronize SSO when base salary changes and autoSSO is true
+  // Synchronize SSO when base salary, salary type, or worked days change and autoSSO is true
   useEffect(() => {
     if (autoSSO) {
-      setSocialSecurityInput(Math.min(750, Math.round(baseSalaryInput * 0.05)));
+      const calculatedBase = salaryTypeInput === 'daily' ? baseSalaryInput * workedDaysInput : baseSalaryInput;
+      setSocialSecurityInput(Math.min(750, Math.round(calculatedBase * 0.05)));
     }
-  }, [baseSalaryInput, autoSSO]);
+  }, [baseSalaryInput, salaryTypeInput, workedDaysInput, autoSSO]);
 
   // Calculations for KPI Cards
-  const totalBase = employees.reduce((sum, e) => sum + e.baseSalary, 0);
+  const totalBase = employees.reduce((sum, e) => sum + getEmpBaseVal(e), 0);
   const totalBonus = employees.reduce((sum, e) => sum + e.bonus, 0);
   const totalSSO = employees.reduce((sum, e) => sum + getEmpSSO(e), 0);
   const totalDeductions = employees.reduce((sum, e) => sum + e.deduction, 0);
@@ -441,6 +333,7 @@ export default function PayrollView({
     setDeptIdInput(departments[0]?.id || '');
     setPositionInput('');
     setBaseSalaryInput(25000);
+    setWorkedDaysInput(15);
     setBonusInput(0);
     setDeductionInput(0);
     setSocialSecurityInput(750);
@@ -451,6 +344,7 @@ export default function PayrollView({
     setBankNameInput('ธนาคารกสิกรไทย');
     setBankAccountInput('');
     setCreatedAtInput(new Date().toISOString().substring(0, 10));
+    setBranchInput('สำนักงานใหญ่');
     setIsModalOpen(true);
   };
 
@@ -462,6 +356,7 @@ export default function PayrollView({
     setDeptIdInput(emp.departmentId);
     setPositionInput(emp.position);
     setBaseSalaryInput(emp.baseSalary);
+    setWorkedDaysInput(emp.workedDays !== undefined ? emp.workedDays : 15);
     setBonusInput(emp.bonus);
     setDeductionInput(emp.deduction);
     const ssoVal = emp.socialSecurity !== undefined ? emp.socialSecurity : Math.min(750, Math.round(emp.baseSalary * 0.05));
@@ -473,6 +368,7 @@ export default function PayrollView({
     setBankNameInput(emp.bankName);
     setBankAccountInput(emp.bankAccount);
     setCreatedAtInput(emp.createdAt ? new Date(emp.createdAt).toISOString().substring(0, 10) : new Date().toISOString().substring(0, 10));
+    setBranchInput(emp.branch || 'สำนักงานใหญ่');
     setIsModalOpen(true);
   };
 
@@ -574,6 +470,7 @@ export default function PayrollView({
       departmentId: deptIdInput,
       position: positionInput,
       baseSalary: Number(baseSalaryInput),
+      workedDays: Number(workedDaysInput),
       bonus: Number(bonusInput),
       deduction: Number(deductionInput),
       socialSecurity: Number(socialSecurityInput),
@@ -582,6 +479,7 @@ export default function PayrollView({
       bankName: bankNameInput,
       paymentPeriod: paymentPeriodInput,
       salaryType: salaryTypeInput,
+      branch: branchInput,
       createdAt: new Date(createdAtInput + 'T12:00:00').toISOString()
     };
 
@@ -600,7 +498,8 @@ export default function PayrollView({
   };
 
   const renderSlipCopy = (emp: EmployeeSalary, copyLabel: string, copyWatermark: string) => {
-    const netSalary = emp.baseSalary + emp.bonus - emp.deduction - getEmpSSO(emp);
+    const baseVal = getEmpBaseVal(emp);
+    const netSalary = baseVal + emp.bonus - emp.deduction - getEmpSSO(emp);
     return (
       <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 text-slate-800 text-xs relative overflow-hidden shadow-xs">
         {/* Subtle Watermark BG */}
@@ -611,7 +510,7 @@ export default function PayrollView({
         {/* Copy Indicator */}
         <div className="flex justify-between items-center bg-blue-50/70 border border-blue-100 p-2 rounded-lg text-[10px] text-blue-800 font-extrabold uppercase tracking-widest mb-3">
           <span>{copyLabel}</span>
-          <span className="text-[9px] text-blue-600 bg-white border border-blue-200 px-1.5 py-0.2 rounded">บริษัทอภิวัฒน์เครื่องครัว จำกัด</span>
+          <span className="text-[9px] text-blue-600 bg-white border border-blue-200 px-1.5 py-0.2 rounded">{companySettings?.name || "บริษัทอภิวัฒน์เครื่องครัว จำกัด"}</span>
         </div>
 
         {/* Header Block / Logo */}
@@ -619,7 +518,7 @@ export default function PayrollView({
           <div>
             <h4 className="text-sm font-black text-slate-850 flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 bg-blue-600 rounded-full inline-block" />
-              บริษัทอภิวัฒน์เครื่องครัว จำกัด
+              {companySettings?.name || "บริษัทอภิวัฒน์เครื่องครัว จำกัด"}
             </h4>
             <p className="text-[10px] text-slate-400 font-bold mt-0.5">ใบสำคัญจ่ายเงินตอบแทน / PAYSLIP (A4 ครึ่งใบ)</p>
           </div>
@@ -659,8 +558,12 @@ export default function PayrollView({
           <div className="space-y-1.5">
             <h5 className="text-[9px] font-black text-slate-450 uppercase tracking-widest border-b pb-1">รายรับ / EARNINGS</h5>
             <div className="flex justify-between text-[11px]">
-              <span className="text-slate-600 font-semibold">เงินเดือนประจำ (Base Salary)</span>
-              <span className="font-mono font-bold text-slate-800">฿{emp.baseSalary.toLocaleString()}.00</span>
+              <span className="text-slate-600 font-semibold">
+                {emp.salaryType === 'daily' 
+                  ? `ค่าจ้างรายวัน (Daily: ฿${emp.baseSalary} x ${emp.workedDays || 15} วัน)` 
+                  : 'เงินเดือนประจำ (Base Salary)'}
+              </span>
+              <span className="font-mono font-bold text-slate-800">฿{baseVal.toLocaleString()}.00</span>
             </div>
             <div className="flex justify-between text-[11px]">
               <span className="text-emerald-700 font-bold">เงินรางวัลพิเศษ / โบนัส (Bonus)</span>
@@ -668,7 +571,7 @@ export default function PayrollView({
             </div>
             <div className="flex justify-between text-[11px] pt-1.5 border-t border-slate-100 font-extrabold text-slate-800">
               <span>รวมรายรับ (Gross Income)</span>
-              <span className="font-mono">฿{(emp.baseSalary + emp.bonus).toLocaleString()}.00</span>
+              <span className="font-mono">฿{(baseVal + emp.bonus).toLocaleString()}.00</span>
             </div>
           </div>
 
@@ -676,8 +579,8 @@ export default function PayrollView({
           <div className="space-y-1.5">
             <h5 className="text-[9px] font-black text-slate-450 uppercase tracking-widest border-b pb-1">รายจ่าย / DEDUCTIONS</h5>
             <div className="flex justify-between text-[11px]">
-              <span className="text-slate-600 font-semibold">กองทุนประกันสังคม (SSO Benefit)</span>
-              <span className="font-mono font-bold text-slate-805">฿{getEmpSSO(emp).toLocaleString()}.05</span>
+              <span className="text-slate-600 font-semibold">กองทุนประกันสังคม (SSO Benefit 5%)</span>
+              <span className="font-mono font-bold text-slate-800">฿{getEmpSSO(emp).toLocaleString()}.00</span>
             </div>
             <div className="flex justify-between text-[11px]">
               <span className="text-rose-600 font-bold">ภาษีหักอื่นๆ (Deduction)</span>
@@ -1346,7 +1249,8 @@ export default function PayrollView({
             <tbody className="divide-y divide-slate-100 text-sm">
               {filteredEmployees.map((emp) => {
                 const ssoVal = getEmpSSO(emp);
-                const netAmount = emp.baseSalary + emp.bonus - emp.deduction - ssoVal;
+                const baseVal = getEmpBaseVal(emp);
+                const netAmount = baseVal + emp.bonus - emp.deduction - ssoVal;
 
                 return (
                   <tr key={emp.id} className="hover:bg-slate-50/30 transition-colors">
@@ -1388,10 +1292,10 @@ export default function PayrollView({
                     <td className="p-4 text-right">
                       <div className="flex flex-col items-end">
                         <span className="font-mono font-bold text-slate-700">
-                          ฿{emp.baseSalary.toLocaleString()}
+                          ฿{baseVal.toLocaleString()}
                         </span>
                         <span className="text-[10px] text-slate-400 font-bold block">
-                          {emp.salaryType === 'daily' ? 'บ./วัน (☀️รายวัน)' : 'บ./เดือน (🗓️รายเดือน)'}
+                          {emp.salaryType === 'daily' ? `฿${emp.baseSalary}/วัน (☀️ ${emp.workedDays || 15} วัน)` : 'บ./เดือน (🗓️รายเดือน)'}
                         </span>
                       </div>
                     </td>
@@ -1554,7 +1458,7 @@ export default function PayrollView({
                     ตั้งค่ารายรับ - รายหัก ประกันสังคม และภาษี
                   </span>
 
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className={`grid grid-cols-1 ${salaryTypeInput === 'daily' ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3`}>
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-slate-600">ประเภทอัตราจ้าง *</label>
                       <select
@@ -1564,8 +1468,10 @@ export default function PayrollView({
                           setSalaryTypeInput(val);
                           if (val === 'daily') {
                             setBaseSalaryInput(500);
+                            setWorkedDaysInput(15);
                           } else {
                             setBaseSalaryInput(25000);
+                            setWorkedDaysInput(30);
                           }
                         }}
                         className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -1591,6 +1497,23 @@ export default function PayrollView({
                         />
                       </div>
                     </div>
+
+                    {salaryTypeInput === 'daily' && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-slate-600">จำนวนวันทำงาน *</label>
+                        <div className="relative">
+                          <input 
+                            type="number" 
+                            required
+                            min={1}
+                            max={31}
+                            value={workedDaysInput}
+                            onChange={e => setWorkedDaysInput(Number(e.target.value))}
+                            className="w-full text-sm px-3 py-1.5 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-right font-mono font-semibold" 
+                          />
+                        </div>
+                      </div>
+                    )}
 
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-slate-600">โบนัส / สวัสดิการพิเศษ *</label>
@@ -1660,7 +1583,20 @@ export default function PayrollView({
                 </div>
 
                 {/* Bank Details, Bank Name, Cycle Period & Date */}
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-600">สาขาปฏิบัติงาน *</label>
+                    <select
+                      value={branchInput}
+                      onChange={e => setBranchInput(e.target.value)}
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold"
+                    >
+                      <option value="สำนักงานใหญ่">🏢 สำนักงานใหญ่</option>
+                      <option value="สาขาควนขนุน">📍 สาขาควนขนุน</option>
+                      <option value="สาขาพัทลุง">📍 สาขาพัทลุง</option>
+                    </select>
+                  </div>
+
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-600">งวดการจ่ายเงินเดือน *</label>
                     <select
@@ -1695,49 +1631,52 @@ export default function PayrollView({
                       <option value="ธนาคารไทยพาณิชย์">ธนาคารไทยพาณิชย์ (SCB)</option>
                       <option value="ธนาคารกรุงเทพ">ธนาคารกรุงเทพ (BBL)</option>
                       <option value="ธนาคารกรุงไทย">ธนาคารกรุงไทย (KTB)</option>
-                      <option value="ธนาคารกรุงศรีอยุธยา">ธนาคารกรุงศรีอยุธยา (BAY)</option>
                       <option value="ธนาคารทหารไทยธนชาต">ธนาคารทหารไทยธนชาต (TTB)</option>
+                      <option value="ธนาคารออมสิน">ธนาคารออมสิน (GSB)</option>
+                      <option value="ธนาคารกรุงศรีอยุธยา">ธนาคารกรุงศรีอยุธยา (BAY)</option>
+                      <option value="เงินสด">💵 จ่ายเป็นเงินสด (Cash)</option>
                     </select>
                   </div>
 
-                  <div className="space-y-1 md:col-span-1">
-                    <label className="text-xs font-semibold text-slate-600">เลขที่บัญชีธนาคาร *</label>
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-semibold text-slate-600">เลขที่บัญชีธนาคาร (ระบุจ่ายสด/เว้นขีดข้ามได้) *</label>
                     <input 
                       type="text" 
                       required
                       placeholder="เช่น 123-4-56789-0"
                       value={bankAccountInput}
                       onChange={e => setBankAccountInput(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono font-bold" 
                     />
                   </div>
+                </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-600">สถานะการทำรายการ</label>
-                    <select
-                      value={statusInput}
-                      onChange={e => setStatusInput(e.target.value as 'paid' | 'pending' | 'hold')}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                    >
-                      <option value="pending">รอการอนุมัติโอนจ่าย (Pending)</option>
-                      <option value="paid">ดำเนินการโอนแล้ว (Paid)</option>
-                      <option value="hold">ระงับระงับการโอนชั่วคราว (Hold)</option>
-                    </select>
-                  </div>
+                {/* Payroll Status */}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">สถานะการจ่ายเงินเดือน *</label>
+                  <select
+                    value={statusInput}
+                    onChange={e => setStatusInput(e.target.value as 'paid' | 'pending' | 'hold')}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold"
+                  >
+                    <option value="pending">⏳ รอการจ่ายเงิน (Pending Approval)</option>
+                    <option value="paid">✅ ชำระเงินเรียบร้อยแล้ว (Transfer Paid)</option>
+                    <option value="hold">❌ ระงับชั่วคราวเพื่อตรวจสอบ (Hold / Audit Needed)</option>
+                  </select>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                   <button 
                     type="button" 
                     onClick={() => setIsModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                    className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
                   >
-                    ยกเลิกขั้นตอน
+                    ยกเลิก
                   </button>
                   <button 
                     id="submit-payroll-btn"
                     type="submit" 
-                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 hover:shadow-xs"
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 hover:shadow-xs cursor-pointer font-bold animate-pulse"
                   >
                     {editingEmployee ? 'บันทึกแก้ไข' : 'บันทึกพนักงานใหม่'}
                   </button>
@@ -1756,7 +1695,7 @@ export default function PayrollView({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl border border-blue-200 shadow-2xl w-full max-w-4xl overflow-hidden text-slate-800 flex flex-col max-h-[92vh]"
+              className="bg-white rounded-2xl border border-blue-200 shadow-2xl w-full max-w-3xl overflow-hidden text-slate-800 flex flex-col max-h-[92vh]"
               onClick={e => e.stopPropagation()}
             >
               {/* Slip Header container */}
@@ -1779,283 +1718,55 @@ export default function PayrollView({
                 </button>
               </div>
 
-              {/* Simulated A4 Document & LINE Sharing dual pane */}
-              <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-slate-100 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
+              {/* Simulated A4 Document standard sheet layout */}
+              <div className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto bg-slate-100 space-y-6 scrollbar-thin">
                 
-                {/* Left Side: Scrollable paper sheet */}
-                <div className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto space-y-6 scrollbar-thin">
+                {/* Paper sheet */}
+                <div ref={printRef} className="bg-white p-5 sm:p-7 rounded-xl shadow-lg border border-slate-200 w-full max-w-3xl mx-auto space-y-6 animate-fade-in">
                   
-                  {/* Paper sheet */}
-                  <div ref={printRef} className="bg-white p-5 sm:p-7 rounded-xl shadow-lg border border-slate-200 w-full max-w-3xl mx-auto space-y-6 animate-fade-in">
-                    
-                    {/* Part 1 Label indicator */}
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200">
-                      <span className="text-[10px] uppercase font-black tracking-widest text-blue-805">ส่วนที่ 1: สำหรับพนักงาน (ต้นฉบับ / Original Staff Receipt)</span>
-                      <span className="text-[9px] font-bold text-slate-400 bg-slate-100 border border-slate-200/60 px-2 py-0.5 rounded">ต้นฉบับสลิปเงินเดือน</span>
-                    </div>
-
-                    {/* Render copy 1 */}
-                    {renderSlipCopy(activeSlipEmployee, "ต้นฉบับสำหรับพนักงาน (Staff Copy)", "ORIGINAL RECEIPT")}
-
-                    {/* Perforated Tear Line */}
-                    <div className="relative py-4 flex items-center justify-center select-none">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-dashed border-slate-350" />
-                      </div>
-                      <div className="relative bg-white border border-slate-200/80 rounded-full px-4 py-1 flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-widest font-black shadow-xs z-10 scale-90 sm:scale-100">
-                        <Scissors className="w-3.5 h-3.5 text-slate-400 rotate-90 shrink-0" />
-                        <span>---------------- รอยประรอยตัดสำหรับฉีกพับแยกสลิปเงินเดือนภายนอก (Fold/Tear Line) ----------------</span>
-                      </div>
-                    </div>
-
-                    {/* Part 2 Label indicator */}
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-250">
-                      <span className="text-[10px] uppercase font-black tracking-widest text-slate-500">ส่วนที่ 2: สำหรับฝ่ายบุคคล / คลังคู่สำเนา (สำเนาคาร์บอน / Duplicate Copy)</span>
-                      <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">สำเนาเหมือนต้นฉบับทุกประการ</span>
-                    </div>
-
-                    {/* Render copy 2 */}
-                    {renderSlipCopy(activeSlipEmployee, "สำเนาสำหรับฝ่ายบุคคล/บริษัท (Company Copy)", "DUPLICATE RECORD")}
-
+                  {/* Part 1 Label indicator */}
+                  <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-blue-805 font-semibold">ส่วนที่ 1: สำหรับพนักงาน (ต้นฉบับ / Original Staff Receipt)</span>
+                    <span className="text-[9px] font-bold text-slate-400 bg-slate-100 border border-slate-200/60 px-2 py-0.5 rounded">ต้นฉบับสลิปเงินเดือน</span>
                   </div>
 
-                  {/* Print Hint Card */}
-                  <div className="bg-blue-50/60 border border-blue-100/80 p-3 rounded-lg max-w-3xl mx-auto flex items-start gap-2 text-[11px] text-blue-850">
-                    <span className="text-blue-500 text-lg">💡</span>
-                    <p className="leading-relaxed font-bold">
-                      <strong>คำแนะนำการพิมพ์:</strong> สลิปถูกจัดวางตามรูปแบบฟอร์มขนาด A4 มาตรฐาน (กว้าง x สูง) แบ่งกึ่งกลางแนวนอน ทำให้ได้เอกสารใบเสร็จขนาด 5.5 x 8.5 นิ้ว จำนวนสองใบที่พิมพ์ออกมาได้หน้าคู่อย่างประหยัดในกระดาษเดียว เหมาะสำหรับการฉีกแบ่งและบันทึกแฟ้มสำนักงาน
-                    </p>
+                  {/* Render copy 1 */}
+                  {renderSlipCopy(activeSlipEmployee, "ต้นฉบับสำหรับพนักงาน (Staff Copy)", "ORIGINAL RECEIPT")}
+
+                  {/* Perforated Tear Line */}
+                  <div className="relative py-4 flex items-center justify-center select-none">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-dashed border-slate-350" />
+                    </div>
+                    <div className="relative bg-white border border-slate-200/80 rounded-full px-4 py-1 flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-widest font-black shadow-xs z-10 scale-90 sm:scale-100">
+                      <Scissors className="w-3.5 h-3.5 text-slate-400 rotate-90 shrink-0" />
+                      <span>---------------- รอยประรอยตัดสำหรับฉีกพับแยกสลิปเงินเดือนภายนอก (Fold/Tear Line) ----------------</span>
+                    </div>
                   </div>
+
+                  {/* Part 2 Label indicator */}
+                  <div className="flex items-center justify-between pb-1 border-b border-slate-250">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-slate-500 font-semibold">ส่วนที่ 2: สำหรับฝ่ายบุคคล / คลังคู่สำเนา (สำเนาคาร์บอน / Duplicate Copy)</span>
+                    <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">สำเนาเหมือนต้นฉบับทุกประการ</span>
+                  </div>
+
+                  {/* Render copy 2 */}
+                  {renderSlipCopy(activeSlipEmployee, "สำเนาสำหรับฝ่ายบุคคล/บริษัท (Company Copy)", "DUPLICATE RECORD")}
+
                 </div>
 
-                {/* Right Side: LINE Support Hub */}
-                <div className="w-full lg:w-[380px] bg-white p-5 shrink-0 overflow-y-auto scrollbar-thin border-t lg:border-t-0 flex flex-col gap-4">
-                  
-                  {/* Hub Header */}
-                  <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
-                        LINE
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-slate-800">เครื่องมือส่งข่าวด่วน & LINE</h4>
-                        <p className="text-[10px] text-slate-400 font-semibold uppercase">LINE Notification Agent</p>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 text-[9px] font-bold bg-green-50 text-green-700 border border-green-200 rounded-full select-none">ใช้งานได้ทันที</span>
-                  </div>
-
-                  {/* Template selector */}
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1 select-none">
-                      <span>เลือกรูปแบบข้อความ (Template)</span>
-                    </label>
-                    <div className="grid grid-cols-3 gap-1">
-                      <button
-                        onClick={() => setLineTemplate('full')}
-                        className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all border shrink-0 flex flex-col items-center justify-center gap-1 ${
-                          lineTemplate === 'full' 
-                            ? 'bg-green-50 text-green-700 border-green-200 font-extrabold' 
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>สลิปแบบเต็ม</span>
-                      </button>
-                      <button
-                        onClick={() => setLineTemplate('summary')}
-                        className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all border shrink-0 flex flex-col items-center justify-center gap-1 ${
-                          lineTemplate === 'summary' 
-                            ? 'bg-green-50 text-green-700 border-green-200 font-extrabold' 
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        <span>แจ้งยอดโอนย่อ</span>
-                      </button>
-                      <button
-                        onClick={() => setLineTemplate('kudos')}
-                        className={`py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all border shrink-0 flex flex-col items-center justify-center gap-1 ${
-                          lineTemplate === 'kudos' 
-                            ? 'bg-green-50 text-green-700 border-green-200 font-extrabold' 
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>ชื่นชม/โบนัส</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Message editor box */}
-                  <div className="space-y-1.5 flex-1 flex flex-col min-h-[160px]">
-                    <div className="flex justify-between items-center select-none">
-                      <label className="text-[11px] font-bold text-slate-600">ข้อความที่เตรียมไว้ (พิมพ์ปรับแต่งในกล่องนี้ได้อิสระ)</label>
-                      <span className="text-[9px] text-slate-400 font-mono font-bold uppercase">{lineMessage.length} ch</span>
-                    </div>
-                    <textarea
-                      value={lineMessage}
-                      onChange={(e) => setLineMessage(e.target.value)}
-                      className="w-full flex-1 bg-slate-50 border border-slate-205 rounded-xl p-3 text-[11px] font-medium leading-relaxed text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:bg-white resize-none font-sans shadow-inner scrollbar-thin"
-                      placeholder="เขียนรายละเอียดข้อมูลที่จะส่งในช่องนี้..."
-                    />
-                  </div>
-
-                  {/* Copy & Direct Share actions group */}
-                  <div className="grid grid-cols-2 gap-2 select-none">
-                    <button
-                      onClick={handleCopyLineMessage}
-                      className="py-2.5 px-3 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1.5 hover:shadow-2xs shrink-0 cursor-pointer"
-                      title="คัดลอกข้อความเป็นข้อความเพื่อส่งเอง"
-                    >
-                      {lineCopied ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-green-500 shrink-0" />
-                          <span className="text-green-600 font-black">คัดลอกสำเร็จ!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>คัดลอกข้อมูลสลิป</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      onClick={handleLineShareUrl}
-                      className="py-2.5 px-3 bg-green-500 hover:bg-green-650 font-bold text-[11px] text-white rounded-xl transition-all flex items-center justify-center gap-1.5 hover:shadow-xs shrink-0 cursor-pointer"
-                      title="ส่งด้วย LINE Share (ลิ้งค์จริงที่จะส่งข้อมูลคุณเข้าแอปพลิเคชัน LINE ทันที)"
-                    >
-                      <Share2 className="w-3.5 h-3.5 shrink-0" />
-                      <span>ส่งด่วนเข้า LINE</span>
-                    </button>
-                  </div>
-
-                  {/* LINE Notify Gateway Advanced Setting Toggle */}
-                  <div className="border-t border-slate-100 pt-3 mt-1 space-y-2 select-none">
-                    <button
-                      onClick={() => setShowTokenConfig(!showTokenConfig)}
-                      className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 hover:text-slate-800 transition-colors"
-                    >
-                      <span className="flex items-center gap-1">
-                        <Settings className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>ตั้งค่า API ส่งข้อความ LINE Notify อัตโนมัติ</span>
-                      </span>
-                      <span>{showTokenConfig ? '▼ ซ่อนตั้งค่า' : '► ตั้งค่าคีย์'}</span>
-                    </button>
-
-                    {/* Interactive Token setup container */}
-                    <AnimatePresence>
-                      {showTokenConfig && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="overflow-hidden space-y-2 pt-0.5"
-                        >
-                          <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-150 space-y-2">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[10px] font-extrabold text-slate-700 block uppercase tracking-wider flex items-center gap-1">
-                                <Lock className="w-3 h-3 text-slate-400" />
-                                <span>LINE Token Key</span>
-                              </span>
-                              <a
-                                href="https://notify-bot.line.me/my/"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[9px] text-green-600 hover:underline font-bold flex items-center gap-0.5"
-                              >
-                                <span>วิธีขอรับโทเคน</span>
-                                <ExternalLink className="w-2.5 h-2.5" />
-                              </a>
-                            </div>
-                            <input
-                              type="password"
-                              value={lineToken}
-                              onChange={(e) => setLineToken(e.target.value)}
-                              placeholder="กรอก LINE Personal Access Token..."
-                              className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-green-500 shadow-3xs"
-                            />
-                            <p className="text-[9.2px] text-slate-400 leading-normal">
-                              เมื่อกรอกข้อมูลนี้ เครื่องระบบจะช่วยคุณบันทึกลง <code>localStorage</code> ไว้ใช้ในโอกาสหน้าอย่างปลอดภัย ข้อมูลเงินเดือนจะแจ้งเข้าสู่แชทกลุ่ม/ส่วนตัวใน LINE โดยตรง
-                            </p>
-                            {lineToken && (
-                              <button
-                                onClick={handleResetLineNotify}
-                                className="text-[9.5px] text-rose-500 font-bold hover:underline cursor-pointer block mt-1"
-                              >
-                                ลบโทเคนออกจากประวัติการจำลองนี้
-                              </button>
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    {/* Standard Action button for Line Notify Send */}
-                    <button
-                      onClick={handleSendLineNotify}
-                      disabled={lineStatus === 'sending'}
-                      className={`w-full py-2 px-3 focus:outline-none font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 transition-all text-white shadow-sm cursor-pointer ${
-                        lineStatus === 'sending'
-                          ? 'bg-slate-400 cursor-not-allowed'
-                          : lineStatus === 'success'
-                          ? 'bg-green-600 hover:bg-green-700'
-                          : 'bg-blue-600 hover:bg-blue-700'
-                      }`}
-                    >
-                      {lineStatus === 'sending' ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                          <span>กำลังส่งสัญญาณจำลองข้อมูลสลิปเข้าระบบ...</span>
-                        </>
-                      ) : lineStatus === 'success' ? (
-                        <>
-                          <Check className="w-4 h-4 shrink-0" />
-                          <span>ส่งสำเร็จเรียบร้อย! ส่งอีกครั้งได้</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-3.5 h-3.5 shrink-0" />
-                          <span>เชื่อมส่งแบบ API LINE Notify (แนะนำ)</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Terminal Style simulated logs panel */}
-                  {lineLogs.length > 0 && (
-                    <div className="rounded-xl bg-slate-900 p-3.5 shadow-md border border-slate-800 space-y-1.5 mt-0.5 font-mono text-[9.5px] scale-[0.98] transition-all">
-                      <div className="flex items-center justify-between text-slate-400 select-none pb-1.5 border-b border-slate-800 font-bold">
-                        <span className="flex items-center gap-1 text-[9px] tracking-wider font-extrabold text-blue-400">
-                          <span className="w-2 h-2 rounded-full bg-green-500 animate-ping inline-block" />
-                          <span>TRANSMISSION LOGGER</span>
-                        </span>
-                        <button 
-                          onClick={() => setLineLogs([])}
-                          className="hover:text-emerald-400 font-bold transition-colors"
-                          title="ล้างประวัติบันทึกบอร์ดจำลอง"
-                        >
-                          ล้างแถว
-                        </button>
-                      </div>
-                      <div className="space-y-1 max-h-[105px] overflow-y-auto scrollbar-thin pt-1 text-emerald-400 leading-relaxed">
-                        {lineLogs.map((log, lIdx) => (
-                          <div key={lIdx} className="pt-0.5 whitespace-pre-wrap flex items-start gap-1">
-                            <span className="text-slate-500 leading-none mt-0.5">&gt;</span>
-                            <span>{log}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
+                {/* Print Hint Card */}
+                <div className="bg-blue-50/60 border border-blue-100/80 p-3 rounded-lg max-w-3xl mx-auto flex items-start gap-2 text-[11px] text-blue-850">
+                  <span className="text-blue-500 text-lg">💡</span>
+                  <p className="leading-relaxed font-bold">
+                    <strong>คำแนะนำการพิมพ์:</strong> สลิปถูกจัดวางตามรูปแบบฟอร์มขนาด A4 มาตรฐาน (กว้าง x สูง) แบ่งกึ่งกลางแนวนอน ทำให้ได้เอกสารใบเสร็จขนาด 5.5 x 8.5 นิ้ว จำนวนสองใบที่พิมพ์ออกมาได้หน้าคู่อย่างประหยัดในกระดาษเดียว เหมาะสำหรับการฉีกแบ่งและบันทึกแฟ้มสำนักงาน
+                  </p>
                 </div>
               </div>
 
               {/* Close Button Footer */}
               <div className="p-4 bg-slate-50 border-t border-slate-150 flex items-center justify-between shrink-0">
-                <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">จัดเตรียมโดยระบบสารสนเทศอัตโนมัติของบริษัทอภิวัฒน์เครื่องครัว จำกัด</span>
+                <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">จัดเตรียมโดยระบบสารสนเทศอัตโนมัติของ{companySettings?.name || "บริษัทอภิวัฒน์เครื่องครัว จำกัด"}</span>
                 <div className="flex gap-2 w-full sm:w-auto justify-end">
                   <button 
                     disabled={isGeneratingPdf}
@@ -2116,7 +1827,7 @@ export default function PayrollView({
                 <div className="bg-amber-50 rounded-xl p-3 border border-amber-100/70 flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
                   <p className="text-[11px] text-amber-850 leading-normal">
-                    <strong>คำเตือน:</strong> ข้อมูลบัญชีการรับเงินเดือน, ประกันสังคม สปส., ตำแหน่งงานที่ทำอยู่ และยอดจ่ายสะสมทั้งหมดจะถูกลบออกถาวรทันที และไม่สามารถกู้คืนได้อีก
+                    <strong>คำเตือนหลัก:</strong> ข้อมูลบัญชีรับเงินเดือน, ยอดสะสม, ประวัติการลงเวลาทำงาน และ<strong>คำขอลาที่ค้างตรวจสอบทั้งหมด</strong>จะถูกถอนและลบออกถาวรทันทีเพื่อความสอดคล้องตรงกันของฐานข้อมูลและระบบคลาวด์
                   </p>
                 </div>
               </div>

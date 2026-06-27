@@ -142,7 +142,11 @@ export default function DashboardOverview({
   const activeLeavesToday = leaveRequests.filter(req => {
     if (req.status !== 'approved') return false;
     // Simple filter simulating today's date coverage
-    const today = "2026-06-19";
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const today = `${year}-${month}-${day}`;
     return req.type !== 'late' && req.startDate <= today && req.endDate >= today;
   }).length;
 

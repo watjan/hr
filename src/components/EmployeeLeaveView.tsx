@@ -84,7 +84,7 @@ export default function EmployeeLeaveView({
   const [editEndDate, setEditEndDate] = useState('');
   const [editDuration, setEditDuration] = useState(1);
   const [editReason, setEditReason] = useState('');
-  const [editStatus, setEditStatus] = useState<'approved' | 'pending' | 'rejected'>('pending');
+  const [editStatus, setEditStatus] = useState<'approved' | 'pending' | 'rejected' | 'cancelled'>('pending');
 
   // Auto calculate duration in days for edit state
   useEffect(() => {
@@ -586,14 +586,40 @@ export default function EmployeeLeaveView({
                             <Clock3 className="w-3.5 h-3.5" /> กำลังตรวจสอบ
                           </span>
                         )}
+                        {req.status === 'cancelled' && (
+                          <span className="text-[10px] font-black text-slate-500 flex items-center gap-1 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                            <XCircle className="w-3.5 h-3.5" /> ยกเลิกแล้ว
+                          </span>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        {onUpdateLeave && (
+                        {onUpdateLeave && req.status !== 'cancelled' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm('❔ คุณต้องการยกเลิกคำขอลาของท่านรายการนี้ใช่หรือไม่?')) {
+                                onUpdateLeave({ ...req, status: 'cancelled' as const });
+                                setShowStatusToast({
+                                  show: true,
+                                  msg: '🚫 ดำเนินการยกเลิกคำขอลาสำเร็จแล้ว',
+                                  type: 'success'
+                                });
+                                setTimeout(() => setShowStatusToast({ show: false, msg: '', type: 'success' }), 3000);
+                              }
+                            }}
+                            className="flex items-center gap-1 text-[10.5px] font-black text-rose-600 hover:text-rose-750 bg-rose-50 hover:bg-rose-100 px-2 py-1 rounded-lg border border-rose-150 transition-colors cursor-pointer"
+                            title="กดยกเลิกการลาด้วยตนเอง"
+                          >
+                            🚫 ยกเลิกใบลา
+                          </button>
+                        )}
+
+                        {onUpdateLeave && req.status === 'pending' && (
                           <button
                             type="button"
                             onClick={() => handleStartEdit(req)}
-                            className="flex items-center gap-1 text-[10.5px] font-black text-indigo-600 hover:text-indigo-750 bg-indigo-50/80 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg border border-indigo-150 transition-colors cursor-pointer"
+                            className="flex items-center gap-1 text-[10.5px] font-black text-indigo-600 hover:text-indigo-750 bg-indigo-50/80 hover:bg-indigo-100 px-2 py-1 rounded-lg border border-indigo-150 transition-colors cursor-pointer"
                             title="แก้ไขคำขอลา"
                           >
                             📝 แก้ไข
@@ -606,7 +632,7 @@ export default function EmployeeLeaveView({
                             type="button"
                             onClick={() => handleDeleteRequest(req.id)}
                             className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-rose-100"
-                            title="ยกเลิกคำขอลา"
+                            title="ลบคำร้องใบลาออกจากการแก้ไข"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -690,6 +716,7 @@ export default function EmployeeLeaveView({
                       <option value="pending">⏳ รออนุมัติ (Pending)</option>
                       <option value="approved">✅ อนุมัติแล้ว (Approved)</option>
                       <option value="rejected">❌ ปฏิเสธการลา (Rejected)</option>
+                      <option value="cancelled">🚫 ยกเลิกแล้ว (Cancelled)</option>
                     </select>
                     {session.role === 'employee' && (
                       <span className="text-[9px] text-slate-400 font-medium block mt-0.5">* เฉพาะผู้อนุมัติ/HR เท่านั้นที่แก้สถานะได้</span>

@@ -63,6 +63,10 @@ import UsersRolesView, { MODULE_TABS, PRESET_AVATARS, ALL_ROLES } from './compon
 import ConsolidatedReportsView from './components/ConsolidatedReportsView';
 import EmployeeLeaveView from './components/EmployeeLeaveView';
 import LeaveApprovalView from './components/LeaveApprovalView';
+import DailyCashLogView from './components/DailyCashLogView';
+import AccountingTaxView from './components/AccountingTaxView';
+import SalesBillingView from './components/SalesBillingView';
+import WebInstallerSimulator from './components/WebInstallerSimulator';
 import { 
   testConnection, 
   saveKeyToCloud, 
@@ -73,6 +77,35 @@ import {
 } from './lib/firebaseSync';
 import firebaseConfig from '../firebase-applet-config.json';
 
+const SYNC_MAPPINGS: Record<string, string> = {
+  'sapphire_users': 'users',
+  'sapphire_role_permissions': 'role_permissions',
+  'hr_company_settings': 'company_settings',
+  'hr_employees': 'employees',
+  'hr_leave_requests': 'leave_requests',
+  'hr_daily_attendance': 'daily_attendance',
+  'sapphire_daily_sales': 'daily_sales',
+  'hr_cheques_data': 'cheques_data',
+  'sapphire_payroll_registries': 'payroll_registries',
+  'hr_cheque_payers': 'cheque_payers',
+  'hr_cheque_payees': 'cheque_payees',
+  'sapphire_sales_annual_target': 'sales_annual_target',
+  'sapphire_billing_statements': 'billing_statements'
+};
+
+// Monkeypatch localStorage.setItem to dispatch custom events
+if (typeof window !== 'undefined' && !(window as any).__local_storage_intercepted) {
+  (window as any).__local_storage_intercepted = true;
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = function (key: string, value: string) {
+    originalSetItem.apply(this, [key, value]);
+    const event = new CustomEvent('local_storage_write', {
+      detail: { key, value }
+    });
+    window.dispatchEvent(event);
+  };
+}
+
 export default function App() {
   // Navigation
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -81,6 +114,8 @@ export default function App() {
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [digitalTime, setDigitalTime] = useState(new Date());
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  const [isChequeDuePopupOpen, setIsChequeDuePopupOpen] = useState(true);
+  const [useSimulatedCheques, setUseSimulatedCheques] = useState(false);
 
   // Firebase Database Sync & Connection States
   const [isCloudSyncModalOpen, setIsCloudSyncModalOpen] = useState(false);
@@ -96,6 +131,110 @@ export default function App() {
   const addSyncLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString('th-TH');
     setSyncLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 30)]);
+  };
+
+  const handleExportFullBackup = () => {
+    const localKeyMap: Record<string, string> = {
+      employees: 'hr_employees',
+      leave_requests: 'hr_leave_requests',
+      daily_attendance: 'hr_daily_attendance',
+      cheques_data: 'hr_cheques_data',
+      daily_sales: 'sapphire_daily_sales',
+      users: 'sapphire_users',
+      role_permissions: 'sapphire_role_permissions',
+      company_settings: 'hr_company_settings'
+    };
+
+    const backupData: Record<string, any> = {};
+    Object.entries(localKeyMap).forEach(([tableId, localKey]) => {
+      const raw = localStorage.getItem(localKey);
+      if (raw) {
+        try {
+          backupData[tableId] = JSON.parse(raw);
+        } catch (e) {
+          backupData[tableId] = raw;
+        }
+      } else {
+        backupData[tableId] = null;
+      }
+    });
+
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dateStr = new Date().toISOString().split('T')[0];
+    a.href = url;
+    a.download = `sapphire_hr_complete_backup_${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addSyncLog('📁 ทำรายการสำรองฐานข้อมูลทั้งหมด (Full Backup JSON) สำเร็จแล้ว!');
+  };
+
+  const handleImportFullBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target?.result;
+      if (typeof text !== 'string') return;
+
+      try {
+        const data = JSON.parse(text);
+        
+        const localKeyMap: Record<string, string> = {
+          employees: 'hr_employees',
+          leave_requests: 'hr_leave_requests',
+          daily_attendance: 'hr_daily_attendance',
+          cheques_data: 'hr_cheques_data',
+          daily_sales: 'sapphire_daily_sales',
+          users: 'sapphire_users',
+          role_permissions: 'sapphire_role_permissions',
+          company_settings: 'hr_company_settings'
+        };
+
+        if (!confirm('คำเตือน: คุณต้องการนำเข้าข้อมูลสำรองทั้งหมด ซึ่งจะติดตั้งแทนที่และลบทับข้อมูลปัจจุบันในเว็บบราวเซอร์ของคุณ ยืนยันดำเนินการต่อใช่หรือไม่?')) {
+          return;
+        }
+
+        setCloudSyncState('syncing');
+        addSyncLog('📁 เริ่มดำเนินการตรวจสอบและนำเข้าชุดแฟ้มสำรอง...');
+
+        let importedTablesCount = 0;
+        for (const [tableId, localKey] of Object.entries(localKeyMap)) {
+          if (tableId in data) {
+            const value = data[tableId];
+            if (value !== undefined) {
+              localStorage.setItem(localKey, JSON.stringify(value));
+              importedTablesCount++;
+              addSyncLog(`   - นำเข้าตาราง [${tableId}] สำเร็จ`);
+              
+              if (isAutoSyncEnabled) {
+                try {
+                  await saveKeyToCloud(tableId, value);
+                  addSyncLog(`   - ซิงค์ขึ้น Firebase [${tableId}] แล้ว`);
+                } catch (err) {
+                  addSyncLog(`   ⚠️ ซิงค์ขึ้นคลาวด์ [${tableId}] ขัดข้อง`);
+                }
+              }
+            }
+          }
+        }
+
+        setCloudSyncState('success');
+        addSyncLog(`🎉 นำเข้าชุดข้อมูลสำเร็จสมบูรณ์ จำนวน ${importedTablesCount} ตาราง!`);
+        alert(`🎉 นำเข้าไฟล์ฐานข้อมูลชุดสมบูรณ์สำเร็จ! (จัดสรรค่าตารางทั้งหมดเรียบร้อย)`);
+        setReloadTrigger(prev => prev + 1);
+        window.dispatchEvent(new Event('sapphire_storage_updated'));
+      } catch (err) {
+        setCloudSyncState('error');
+        addSyncLog(`❌ นำเข้าไฟล์สารสนเทศล้มเหลว: รูปแบบ JSON ไม่ถูกต้อง หรือโครงสร้างเสียหาย`);
+        alert('❌ ไฟล์ที่อัปโหลดไม่ใช่รูปแบบ JSON ที่ถูกต้อง หรือระบบเสียหาย');
+      }
+    };
+    reader.readAsText(file);
   };
 
   useEffect(() => {
@@ -142,18 +281,18 @@ export default function App() {
 
       const isConnected = await handleCheckConnection(true);
       if (isConnected) {
-        const hasDoneFirstSync = localStorage.getItem('sapphire_first_boot_sync');
-        if (!hasDoneFirstSync) {
-          addSyncLog('ตรวจพบการเข้าสู่ระบบครั้งแรก กำลังซิงค์ข้อมูลล่าสุดจาก Cloud Storage...');
+        if (isAutoSyncEnabled) {
+          addSyncLog('🔄 ตรวจพบระบบเริ่มทำงาน กำลังซิงโครไนซ์ข้อมูลล่าสุดจาก Firebase Cloud เพื่อระบบทุกอัพเดตเหมือนกันและฐานข้อมูลตรง...');
           try {
             setCloudSyncState('syncing');
             const dataResult = await downloadAllFromCloud();
             if (Object.keys(dataResult).length > 0) {
               setCloudSyncState('success');
-              addSyncLog(`📥 ดึงและคัดลอกข้อมูลสำเร็จ (${Object.keys(dataResult).length} ตารางข้อมูลรวม)`);
+              addSyncLog(`📥 ดึงและประสานข้อมูลรวมจาก Cloud สำเร็จ (${Object.keys(dataResult).length} ตารางข้อมูล)`);
               localStorage.setItem('sapphire_first_boot_sync', 'true');
-              // Force local triggers
+              // Force local triggers and notify other components
               setReloadTrigger(prev => prev + 1);
+              window.dispatchEvent(new Event('sapphire_storage_updated'));
             } else {
               setCloudSyncState('syncing');
               addSyncLog('⚠️ ตรวจพบฐานข้อมูลคลาวด์ยังว่างเปล่า กำลังดำเนินจัดอัปโหลดประถมฐานข้อมูลเริ่มต้นขึ้นสู่คลาวด์เพื่อความปลอดภัย...');
@@ -162,24 +301,116 @@ export default function App() {
               addSyncLog('✅ ทำการอัปโหลดฐานข้อมูลความปลอดภัยรอบตั้งต้นสำเร็จเรียบร้อย!');
               localStorage.setItem('sapphire_first_boot_sync', 'true');
               setReloadTrigger(prev => prev + 1);
+              window.dispatchEvent(new Event('sapphire_storage_updated'));
             }
           } catch (e) {
             setCloudSyncState('error');
             addSyncLog(`❌ การซิงโครไนซ์ข้อมูลมีอุปสรรค: ${e instanceof Error ? e.message : String(e)}`);
           }
+        } else {
+          const hasDoneFirstSync = localStorage.getItem('sapphire_first_boot_sync');
+          if (!hasDoneFirstSync) {
+            addSyncLog('ตรวจพบการเข้าสู่ระบบครั้งแรก กำลังซิงค์ข้อมูลล่าสุดจาก Cloud Storage...');
+            try {
+              setCloudSyncState('syncing');
+              const dataResult = await downloadAllFromCloud();
+              if (Object.keys(dataResult).length > 0) {
+                setCloudSyncState('success');
+                addSyncLog(`📥 ดึงและคัดลอกข้อมูลสำเร็จ (${Object.keys(dataResult).length} ตารางข้อมูลรวม)`);
+                localStorage.setItem('sapphire_first_boot_sync', 'true');
+                setReloadTrigger(prev => prev + 1);
+                window.dispatchEvent(new Event('sapphire_storage_updated'));
+              } else {
+                setCloudSyncState('syncing');
+                addSyncLog('⚠️ ตรวจพบฐานข้อมูลคลาวด์ยังว่างเปล่า กำลังดำเนินจัดอัปโหลดประถมฐานข้อมูลเริ่มต้นขึ้นสู่คลาวด์เพื่อความปลอดภัย...');
+                await uploadAllToCloud();
+                setCloudSyncState('success');
+                addSyncLog('✅ ทำการอัปโหลดฐานข้อมูลความปลอดภัยรอบตั้งต้นสำเร็จเรียบร้อย!');
+                localStorage.setItem('sapphire_first_boot_sync', 'true');
+                setReloadTrigger(prev => prev + 1);
+                window.dispatchEvent(new Event('sapphire_storage_updated'));
+              }
+            } catch (e) {
+              setCloudSyncState('error');
+              addSyncLog(`❌ การซิงโครไนซ์ข้อมูลมีอุปสรรค: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
         }
       }
     };
     runBootSync();
-  }, []);
+  }, [isAutoSyncEnabled]);
+
+  // Hook into local_storage_write to automatically save to Firebase when enabled
+  useEffect(() => {
+    const handleStorageWrite = async (e: Event) => {
+      const customEvent = e as CustomEvent<{ key: string; value: string }>;
+      const { key, value } = customEvent.detail;
+
+      if (!isAutoSyncEnabled) return;
+      if ((window as any).__is_downloading_from_cloud) return;
+
+      const cloudKey = SYNC_MAPPINGS[key];
+      if (cloudKey) {
+        try {
+          let parsedPayload: any;
+          try {
+            parsedPayload = JSON.parse(value);
+          } catch {
+            parsedPayload = value; // fallback for raw strings
+          }
+          await saveKeyToCloud(cloudKey, parsedPayload);
+          addSyncLog(`⚡️ อัปเดตข้อมูลตรงกันเรียบร้อย: ซิงก์คีย์ [${cloudKey}] สู่ Firestore สำเร็จ`);
+        } catch (error) {
+          addSyncLog(`⚠️ ซิงก์แบคอัพด่วน [${cloudKey}] ขัดข้อง: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    };
+
+    window.addEventListener('local_storage_write', handleStorageWrite);
+    return () => {
+      window.removeEventListener('local_storage_write', handleStorageWrite);
+    };
+  }, [isAutoSyncEnabled]);
 
   useEffect(() => {
     const handleUpdate = () => {
       setPermissionsTrigger(prev => prev + 1);
     };
+    const handleStorageUpdated = () => {
+      setLastUpdated(new Date().toLocaleTimeString('th-TH'));
+      
+      const savedCompany = localStorage.getItem('hr_company_settings');
+      const savedEmployees = localStorage.getItem('hr_employees');
+      const savedLeaves = localStorage.getItem('hr_leave_requests');
+      const savedCheques = localStorage.getItem('hr_cheques_data');
+      const savedPayers = localStorage.getItem('hr_cheque_payers');
+      const savedPayees = localStorage.getItem('hr_cheque_payees');
+
+      if (savedCompany) {
+        try { setCompanySettings(JSON.parse(savedCompany)); } catch (e) {}
+      }
+      if (savedEmployees) {
+        try { setEmployees(JSON.parse(savedEmployees)); } catch (e) {}
+      }
+      if (savedLeaves) {
+        try { setLeaveRequests(JSON.parse(savedLeaves)); } catch (e) {}
+      }
+      if (savedCheques) {
+        try { setCheques(JSON.parse(savedCheques)); } catch (e) {}
+      }
+      if (savedPayers) {
+        try { setPayers(JSON.parse(savedPayers)); } catch (e) {}
+      }
+      if (savedPayees) {
+        try { setPayees(JSON.parse(savedPayees)); } catch (e) {}
+      }
+    };
     window.addEventListener('sapphire_permissions_updated', handleUpdate);
+    window.addEventListener('sapphire_storage_updated', handleStorageUpdated);
     return () => {
       window.removeEventListener('sapphire_permissions_updated', handleUpdate);
+      window.removeEventListener('sapphire_storage_updated', handleStorageUpdated);
     };
   }, []);
 
@@ -191,6 +422,7 @@ export default function App() {
   const [isSalesMenuOpen, setIsSalesMenuOpen] = useState(true);
   const [isChequeMenuOpen, setIsChequeMenuOpen] = useState(true);
   const [isReportsMenuOpen, setIsReportsMenuOpen] = useState(true);
+  const [isAccountingMenuOpen, setIsAccountingMenuOpen] = useState(true);
 
   const handleUpdateSidebarColor = (color: string) => {
     setSidebarColor(color);
@@ -376,6 +608,7 @@ export default function App() {
   const [companySettings, setCompanySettings] = useState<CompanySettings>(INITIAL_COMPANY_SETTINGS);
   const [employees, setEmployees] = useState<EmployeeSalary[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [cheques, setCheques] = useState<Cheque[]>(() => {
     const saved = localStorage.getItem('hr_cheques_data');
     if (saved) {
@@ -495,7 +728,27 @@ export default function App() {
     }
 
     setLastUpdated(new Date().toLocaleTimeString('th-TH'));
+    setIsInitialLoadDone(true);
   }, [reloadTrigger]);
+
+  // Auto-prune leave requests if the associated employee does not exist in our employees list (to prevent orphaned leaves/history)
+  useEffect(() => {
+    if (isInitialLoadDone && leaveRequests.length > 0) {
+      const hasOrphaned = leaveRequests.some(
+        req => !employees.some(emp => emp.id === req.employeeId)
+      );
+      if (hasOrphaned) {
+        const cleaned = leaveRequests.filter(
+          req => employees.some(emp => emp.id === req.employeeId)
+        );
+        setLeaveRequests(cleaned);
+        localStorage.setItem('hr_leave_requests', JSON.stringify(cleaned));
+        syncWithCloudIfEnabled('leave_requests', cleaned);
+        triggerUpdateNotification();
+        addSyncLog('🧹 ระบบรักษาความสอดคล้อง: ทำความสะอาดประวัติการลาทั้งหมดของพนักงานที่ไม่มีชื่ออยู่ในระบบเรียบร้อยแล้ว เพื่อความถูกต้องของคลาวด์');
+      }
+    }
+  }, [isInitialLoadDone, employees, leaveRequests]);
 
   // 2. State synchronization with LocalStorage
   const saveCompanySettings = (updated: CompanySettings) => {
@@ -526,10 +779,25 @@ export default function App() {
     setEmployees(updated);
     localStorage.setItem('hr_employees', JSON.stringify(updated));
     
-    // Also cleanup associated leave requests for data consistency
+    // Also cleanup associated leave requests for data consistency (especially pending leave requests)
     const updatedLeaves = leaveRequests.filter(req => req.employeeId !== id);
     setLeaveRequests(updatedLeaves);
     localStorage.setItem('hr_leave_requests', JSON.stringify(updatedLeaves));
+
+    // Also cleanup associated daily attendance logs for data consistency
+    const savedAttendance = localStorage.getItem('hr_daily_attendance');
+    if (savedAttendance) {
+      try {
+        const attendanceList = JSON.parse(savedAttendance);
+        if (Array.isArray(attendanceList)) {
+          const updatedAttendance = attendanceList.filter((item: any) => item.employeeId !== id);
+          localStorage.setItem('hr_daily_attendance', JSON.stringify(updatedAttendance));
+          syncWithCloudIfEnabled('daily_attendance', updatedAttendance);
+        }
+      } catch (e) {
+        console.error('Error cleaning daily attendance during employee delete', e);
+      }
+    }
     
     triggerUpdateNotification();
     syncWithCloudIfEnabled('employees', updated);
@@ -611,6 +879,7 @@ export default function App() {
 
   const triggerUpdateNotification = () => {
     setLastUpdated(new Date().toLocaleTimeString('th-TH'));
+    window.dispatchEvent(new Event('sapphire_storage_updated'));
   };
 
   // 3. Clear data and Restore defaults
@@ -637,6 +906,8 @@ export default function App() {
     if (tab === 'report-sales-yearly') targetTab = 'sales-yearly';
     if (tab === 'cheque-payers') targetTab = 'cheque-incoming';
     if (tab === 'cheque-payees') targetTab = 'cheque-outgoing';
+    if (tab === 'accounting-tax' || tab === 'accounting-tax-detail' || tab === 'accounting-tax-transfer') targetTab = 'employees';
+    if (tab === 'sales-cashlog') targetTab = 'sales-daily';
     
     // Employee routing: ONLY allowed to see 'employee-leave'
     if (session.role === 'employee') {
@@ -649,7 +920,12 @@ export default function App() {
     }
     
     // Always allow basic dashboard & users tab so everyone can manage/view accounts
-    if (targetTab === 'dashboard' || targetTab === 'users') return true;
+    if (targetTab === 'dashboard' || targetTab === 'users' || targetTab === 'system-installer') return true;
+    
+    // Allow sales-billing for admin, sales, accountant
+    if (targetTab === 'sales-billing') {
+      return session.role === 'admin' || session.role === 'sales' || session.role === 'accountant';
+    }
     
     // Access permission matrix
     const saved = localStorage.getItem('sapphire_role_permissions');
@@ -873,6 +1149,17 @@ export default function App() {
                       <span className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sales-yearly' ? 'bg-white' : 'bg-purple-500'}`} />
                       ยอดขายปี (Yearly)
                     </button>
+                    <button
+                      onClick={() => setActiveTab('sales-cashlog')}
+                      className={`w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeTab === 'sales-cashlog' 
+                          ? 'bg-blue-600 text-white font-extrabold shadow-sm' 
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sales-cashlog' ? 'bg-white' : 'bg-emerald-500'}`} />
+                      บันทึกยอดเงินสด (Cash Log Grid)
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -950,6 +1237,68 @@ export default function App() {
           </div>
           )}
 
+          {/* Foldable Accounting Navigation Tab */}
+          {isTabAllowed('accounting-tax') && (
+            <div className="border-t border-white/5 pt-2 mt-2">
+              <button
+                onClick={() => setIsAccountingMenuOpen(!isAccountingMenuOpen)}
+                className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer text-slate-300 hover:text-white hover:bg-white/10"
+              >
+                <div className="flex items-center gap-3">
+                  <Wallet className="w-4.5 h-4.5 text-emerald-400" />
+                  <span>ระบบบัญชี (Accounting)</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-extrabold pr-1">
+                  {isAccountingMenuOpen ? '▼' : '►'}
+                </span>
+              </button>
+              <AnimatePresence initial={false}>
+                {isAccountingMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="pl-6 space-y-1 mt-1 overflow-hidden"
+                  >
+                    <button
+                      onClick={() => setActiveTab('accounting-tax')}
+                      className={`w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeTab === 'accounting-tax' 
+                          ? 'bg-blue-600 text-white font-extrabold shadow-sm' 
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${activeTab === 'accounting-tax' ? 'bg-white' : 'bg-emerald-500'}`} />
+                      1. ยอดจ่ายรายเดือนที่ส่งสรรพกรแล้ว
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('accounting-tax-detail')}
+                      className={`w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeTab === 'accounting-tax-detail' 
+                          ? 'bg-blue-600 text-white font-extrabold shadow-sm' 
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${activeTab === 'accounting-tax-detail' ? 'bg-white' : 'bg-blue-500'}`} />
+                      1.1 รายการจ่ายส่งสรรพกรแต่ละเดือน
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('accounting-tax-transfer')}
+                      className={`w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeTab === 'accounting-tax-transfer' 
+                          ? 'bg-blue-600 text-white font-extrabold shadow-sm' 
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${activeTab === 'accounting-tax-transfer' ? 'bg-white' : 'bg-indigo-500'}`} />
+                      1.2 โอนเงินให้สรรพกรแต่ละเดือน
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
           {/* Item 7: Users & Roles Control Panel */}
           {isTabAllowed('users') && (
             <div className="border-t border-white/5 pt-2 mt-2">
@@ -964,6 +1313,24 @@ export default function App() {
               >
                 <UserCog className="w-4.5 h-4.5 text-indigo-400" />
                 7. ทะเบียนบริหารจัดการบัญชีผู้ใช้งาน
+              </button>
+            </div>
+          )}
+
+          {/* Item 9: Web Installer Simulator */}
+          {isTabAllowed('system-installer') && (
+            <div className="border-t border-white/5 pt-2 mt-2">
+              <button
+                id="tab-installer-btn"
+                onClick={() => setActiveTab('system-installer')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+                  activeTab === 'system-installer'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10 shrink-0'
+                }`}
+              >
+                <Server className="w-4.5 h-4.5 text-blue-400 animate-pulse" />
+                9. โปรแกรมจำลองการติดตั้งระบบ
               </button>
             </div>
           )}
@@ -1020,6 +1387,24 @@ export default function App() {
                   </motion.div>
                 )}
               </AnimatePresence>
+            </div>
+          )}
+
+          {/* Menu 9: Sales Billing Tab */}
+          {isTabAllowed('sales-billing') && (
+            <div className="border-t border-white/5 pt-2 mt-2">
+              <button
+                id="tab-sales-billing-btn"
+                onClick={() => setActiveTab('sales-billing')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+                  activeTab === 'sales-billing'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <FileText className="w-4.5 h-4.5 text-blue-400" />
+                <span>9. เซลมาใบวางบิล</span>
+              </button>
             </div>
           )}
         </nav>
@@ -1166,11 +1551,13 @@ export default function App() {
           <ChequeNotifications 
             cheques={cheques} 
             leaveRequests={leaveRequests} 
+            employees={employees}
             currentUserRole={session?.role} 
             onNavigate={(tab) => {
               setActiveTab(tab);
               setIsMobileMenuOpen(false);
             }} 
+            onUpdateLeave={handleUpdateLeave}
           />
           
           <img 
@@ -1301,6 +1688,13 @@ export default function App() {
                         <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
                         ยอดขายปี (Yearly)
                       </button>
+                      <button
+                        onClick={() => { setActiveTab('sales-cashlog'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white ${activeTab === 'sales-cashlog' ? 'bg-blue-600' : 'bg-white/5'}`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        บันทึกยอดเงินสด (Cash Log Grid)
+                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1361,6 +1755,55 @@ export default function App() {
               </div>
             )}
 
+            {/* Mobile collapsible Accounting menu */}
+            {isTabAllowed('accounting-tax') && (
+              <div className="pt-2 border-t border-white/10 mt-1">
+                <button
+                  onClick={() => setIsAccountingMenuOpen(!isAccountingMenuOpen)}
+                  className="w-full text-left flex items-center justify-between px-3 py-2 rounded-lg text-sm font-bold text-white bg-white/5"
+                >
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-4 h-4 text-emerald-400" />
+                    <span>ระบบบัญชี (Accounting)</span>
+                  </div>
+                  <span className="text-[10px] text-slate-355 text-slate-300 pr-1">{isAccountingMenuOpen ? '▼' : '►'}</span>
+                </button>
+                
+                <AnimatePresence initial={false}>
+                  {isAccountingMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="pl-5 space-y-1 mt-1 overflow-hidden"
+                    >
+                      <button
+                        onClick={() => { setActiveTab('accounting-tax'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white ${activeTab === 'accounting-tax' ? 'bg-blue-600' : 'bg-white/5'}`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        1. ยอดจ่ายรายเดือนที่ส่งสรรพกรแล้ว
+                      </button>
+                      <button
+                        onClick={() => { setActiveTab('accounting-tax-detail'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white ${activeTab === 'accounting-tax-detail' ? 'bg-blue-600' : 'bg-white/5'}`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        1.1 รายการจ่ายส่งสรรพกรแต่ละเดือน
+                      </button>
+                      <button
+                        onClick={() => { setActiveTab('accounting-tax-transfer'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white ${activeTab === 'accounting-tax-transfer' ? 'bg-blue-600' : 'bg-white/5'}`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                        1.2 โอนเงินให้สรรพกรแต่ละเดือน
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
             {/* Mobile Users & Roles tab */}
             {isTabAllowed('users') && (
               <div className="pt-2 border-t border-white/10 mt-1">
@@ -1369,6 +1812,18 @@ export default function App() {
                   className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold text-white ${activeTab === 'users' ? 'bg-blue-600' : 'bg-white/5'}`}
                 >
                   <UserCog className="w-4 h-4 text-indigo-400" /> 7. ทะเบียนบริหารจัดการบัญชีผู้ใช้งาน
+                </button>
+              </div>
+            )}
+
+            {/* Mobile Web Installer Simulator tab */}
+            {isTabAllowed('system-installer') && (
+              <div className="pt-2 border-t border-white/10 mt-1">
+                <button
+                  onClick={() => { setActiveTab('system-installer'); setIsMobileMenuOpen(false); }}
+                  className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold text-white ${activeTab === 'system-installer' ? 'bg-blue-600' : 'bg-white/5'}`}
+                >
+                  <Server className="w-4 h-4 text-blue-400" /> 9. โปรแกรมจำลองการติดตั้งระบบ
                 </button>
               </div>
             )}
@@ -1416,6 +1871,18 @@ export default function App() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
+            )}
+
+            {/* Mobile Sales Billing Tab */}
+            {isTabAllowed('sales-billing') && (
+              <div className="pt-2 border-t border-white/10 mt-1">
+                <button
+                  onClick={() => { setActiveTab('sales-billing'); setIsMobileMenuOpen(false); }}
+                  className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold text-white ${activeTab === 'sales-billing' ? 'bg-blue-600' : 'bg-white/5'}`}
+                >
+                  <FileText className="w-4 h-4 text-blue-400" /> 9. เซลมาใบวางบิล
+                </button>
               </div>
             )}
  
@@ -1484,13 +1951,18 @@ export default function App() {
                   {activeTab === 'sales-daily' && 'รายงานการบริหารจัดการ ยอดขายรายวัน (Daily Sales)'}
                   {activeTab === 'sales-monthly' && 'สรุปสถิติวิเคราะห์ ยอดขายรวมรายเดือน (Monthly Sales Grid)'}
                   {activeTab === 'sales-yearly' && 'ข้อมูลสรุปศักยภาพและเป้าหมาย ยอดขายรายปี (Yearly Business Target)'}
+                  {activeTab === 'sales-cashlog' && 'สมุดบันทึกยอดเงินสดแบบตารางกริด (Daily Cash Log Grid)'}
                   {activeTab === 'cheque-incoming' && 'ระบบสารสนเทศหนังสือสำคัญทางการเงิน (เช็คขารับ - Incoming Cheques)'}
                   {activeTab === 'cheque-payers' && 'ฐานข้อมูลลูกค้าผู้สั่งจ่าย (เช็คขารับ) (Customers / Payers Directory)'}
                   {activeTab === 'cheque-outgoing' && 'ระบบจ่ายตราสารและหนังสือแลกเงิน (เช็คขาจ่าย - Outgoing Cheques)'}
                   {activeTab === 'cheque-payees' && 'ฐานข้อมูลผู้รับเงิน/ซัพพลายเออร์ (เช็คขาจ่าย) (Suppliers / Payees Directory)'}
                   {activeTab === 'users' && 'ทะเบียนบริหารจัดการบัญชีผู้ใช้งาน (User Accounts Control Panel)'}
+                  {activeTab === 'system-installer' && 'โปรแกรมจำลองการตั้งค่าโครงสร้างและติดตั้งระบบ (Web Setup Installer Simulator)'}
                   {activeTab === 'report-sales-monthly' && 'บริหารรวมรายงานทั้งหมด: รายงานสรุปยอดขายรายเดือนสุทธิสะสม (Consolidated Monthly Sales)'}
                   {activeTab === 'report-sales-yearly' && 'บริหารรวมรายงานทั้งหมด: รายงานสรุปยอดขายรายปีอ้างอิงเป้าหมาย (Consolidated Yearly Sales)'}
+                  {activeTab === 'accounting-tax' && 'ระบบบัญชีและยอดส่งภาษีสรรพากร (Tax & Payroll Accounting Panel)'}
+                  {activeTab === 'accounting-tax-detail' && 'ระบบบัญชี 1.1 รายการจ่ายส่งสรรพากรแต่ละเดือน (Individual Tax Filings)'}
+                  {activeTab === 'accounting-tax-transfer' && 'ระบบบัญชี 1.2 โอนเงินจ่ายภาษีส่งสรรพากรแต่ละรอบเดือน (Monthly Revenue Direct Transfer)'}
                 </h1>
               </div>
             </div>
@@ -1536,8 +2008,10 @@ export default function App() {
               <ChequeNotifications 
                 cheques={cheques} 
                 leaveRequests={leaveRequests} 
+                employees={employees}
                 currentUserRole={session?.role} 
                 onNavigate={(tab) => setActiveTab(tab)} 
+                onUpdateLeave={handleUpdateLeave}
               />
               <div className="h-6 w-[1px] bg-slate-200" />
               
@@ -1710,6 +2184,259 @@ export default function App() {
                         dbConnected={cloudConnectionState === 'connected'}
                         onOpenSyncHub={() => setIsCloudSyncModalOpen(true)}
                       />
+
+                      {/* Cheque Due Alarm Popup (Incoming daily until cleared, Outgoing from 2 days prior daily until cleared) */}
+                      {(() => {
+                        const getChequeDiffDays = (chequeDateStr: string) => {
+                          if (!chequeDateStr) return 999;
+                          try {
+                            const chequeTime = new Date(chequeDateStr).setHours(0, 0, 0, 0);
+                            const todayTime = new Date().setHours(0, 0, 0, 0);
+                            return Math.round((chequeTime - todayTime) / (1000 * 60 * 60 * 24));
+                          } catch {
+                            return 999;
+                          }
+                        };
+
+                        const realDueTomorrowCheques = cheques.filter(ch => {
+                          const isPending = ch.status === 'pending_deposit' || ch.status === 'pending_receipt';
+                          if (!isPending) return false;
+                          const diffDays = getChequeDiffDays(ch.chequeDate);
+                          
+                          if (ch.type === 'incoming') {
+                            // ป๊อบอัพแจ้งเตือนเช็คขารับที่ยังไม่ขึ้นเงิน ให้แจ้งเตือนทุกวันตั้งแต่วันครบกำหนด (หรือก่อนหน้า 1 วัน) จนกว่าจะได้รับเงิน/เคลียร์แล้ว
+                            return diffDays <= 1;
+                          } else {
+                            // เช็คขาจ่ายเตือนล่วงหน้า 2 วัน วันถัดไปแจ้งอีกจนกว่าจะทำการจ่ายแล้ว (diffDays <= 2)
+                            return diffDays <= 2;
+                          }
+                        });
+
+                        const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                        const inTwoDaysStr = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                        const threeDaysAgoStr = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+                        const testCheques = [
+                          {
+                            id: "CHQ-SIM-001",
+                            chequeNumber: "99988112",
+                            bankName: "ธนาคารกสิกรไทย",
+                            branch: "สำนักงานใหญ่",
+                            chequeDate: threeDaysAgoStr,
+                            amount: 145000,
+                            partyName: "บริษัท สยาม คิทเช่นเวิล์ด จำกัด",
+                            type: "incoming" as const,
+                            status: "pending_deposit" as const,
+                            note: "จำลองขารับ: เกินกำหนดขึ้นเงินมาแล้ว 3 วัน (เตือนต่อเนื่องทุกวัน จนกว่าจะทำรายการรับเงินสำเร็จ)"
+                          },
+                          {
+                            id: "CHQ-SIM-002",
+                            chequeNumber: "88877554",
+                            bankName: "ธนาคารไทยพาณิชย์",
+                            branch: "สาขาอโศก",
+                            chequeDate: inTwoDaysStr,
+                            amount: 98000,
+                            partyName: "บจก. เพลตโลหะไทย พาวเวอร์",
+                            type: "outgoing" as const,
+                            status: "pending_deposit" as const,
+                            note: "จำลองขาจ่าย: ครบกำหนดล่วงหน้า 2 วัน (เตือนล่วงหน้า และวันถัดไปเตือนซ้ำ จนกว่าจะบันทึกชำระเงิน)"
+                          }
+                        ];
+
+                        const activeCheques = realDueTomorrowCheques.length > 0 
+                          ? realDueTomorrowCheques 
+                          : testCheques; 
+                          
+                        const isSimulating = realDueTomorrowCheques.length === 0;
+
+                        if (!isChequeDuePopupOpen) return null;
+
+                        return (
+                          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs font-sans">
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              className="w-full max-w-2xl bg-white rounded-3xl overflow-hidden shadow-2xl ring-4 ring-amber-500/30 border border-slate-100 flex flex-col max-h-[90vh]"
+                            >
+                              {/* Header with Amber Alert Theme */}
+                              <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 p-6 text-white flex items-start gap-4 shrink-0 shadow-md">
+                                <div className="p-3 bg-white/10 rounded-2xl animate-pulse shrink-0 border border-white/10">
+                                  <Clock className="w-8 h-8 text-amber-100" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="bg-rose-500/90 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider animate-bounce shadow-xs">
+                                      แจ้งเตือนระบบการเงินตราสารหนี้เช็ค
+                                    </span>
+                                    {isSimulating && (
+                                        <span className="bg-amber-950/40 text-amber-100 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                          (โหมดจำลองทดสอบระบบ)
+                                        </span>
+                                      )}
+                                  </div>
+                                  <h3 className="text-xl font-extrabold tracking-tight mt-1">
+                                    🔔 ตรวจพบเช็คขารับค้างเงิน หรือเช็คขาจ่ายถึงกำหนดชำระ
+                                  </h3>
+                                  <p className="text-xs text-amber-100 font-medium">
+                                    แจ้งเตือนเช็คขารับที่ยังไม่ขึ้นเงินทุกวันจนกว่าจะเคลียร์ และเตือนเช็คขาจ่ายล่วงหน้า 2 วันต่อเนื่องจนกว่าจะลงจ่ายเงินแล้ว
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => setIsChequeDuePopupOpen(false)}
+                                  className="p-1.5 rounded-full bg-black/10 hover:bg-black/20 text-white transition-colors cursor-pointer block"
+                                  title="ปิดหน้าต่างนี้"
+                                >
+                                  <X className="w-5 h-5" />
+                                </button>
+                              </div>
+
+                              {/* Body Container */}
+                              <div className="p-6 overflow-y-auto space-y-4 flex-1">
+                                {isSimulating && (
+                                  <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200/50 flex gap-3 text-amber-900 text-xs font-semibold leading-relaxed">
+                                    <span className="text-base shrink-0">💡</span>
+                                    <div>
+                                      <p className="font-extrabold text-amber-950">จำลองจำพวกข้อมูลเพื่อพรีวิวความถูกต้อง (Preview Mode)</p>
+                                      <p className="text-[11px] font-medium text-amber-800 mt-0.5 font-sans">
+                                        เนื่องจากในระบบของคุณไม่มีข้อมูลเช็คค้างชำระจริงที่เข้าเกณฑ์ ณ วันนี้ ระบบจึงจำลองตัวอย่างให้คุณตรวจเช็ค ทั้งเช็ครับที่เกิณงวด (เตือนทุกวัน) และเช็คจ่ายล่วงหน้า 2 วัน (แจ้งจนกว่าจะเคลียร์)
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="space-y-3">
+                                  {activeCheques.map((ch, idx) => {
+                                    const isIncoming = ch.type === 'incoming';
+                                    const diffDays = getChequeDiffDays(ch.chequeDate);
+                                    
+                                    let badgeType = "default";
+                                    let statusText = "";
+                                    
+                                    if (isIncoming) {
+                                      if (diffDays < 0) {
+                                        badgeType = "overdue";
+                                        statusText = `⚠️ ค้างเงินเลยกำหนดมาแล้ว ${Math.abs(diffDays)} วัน!`;
+                                      } else if (diffDays === 0) {
+                                        badgeType = "today";
+                                        statusText = "⚡️ ครบกำหนดนำเช็คขึ้นเงินในวันนี้!";
+                                      } else if (diffDays === 1) {
+                                        badgeType = "warning";
+                                        statusText = "⏰ ถึงกำหนดเคลียร์พรุ่งนี้ (แจ้งเตือนล่วงหน้า 1 วัน)";
+                                      } else {
+                                        badgeType = "future";
+                                        statusText = `⏳ เตรียมขึ้นเงินล่วงหน้า ${diffDays} วัน`;
+                                      }
+                                    } else {
+                                      if (diffDays < 0) {
+                                        badgeType = "overdue";
+                                        statusText = `🚨 ค้างจ่ายยอดเลยกำหนดมาแล้ว ${Math.abs(diffDays)} วัน!`;
+                                      } else if (diffDays === 0) {
+                                        badgeType = "today";
+                                        statusText = "🔥 ถึงกำหนดดึงยอดชำระจ่ายวันนี้!";
+                                      } else if (diffDays === 1) {
+                                        badgeType = "warning";
+                                        statusText = "⏰ ครบกำหนดชำระพรุ่งนี้ (แจ้งเตือนล่วงหน้า 1 วัน)";
+                                      } else if (diffDays === 2) {
+                                        badgeType = "warning-two";
+                                        statusText = "⏰ ครบกำหนดจ่ายเงินล่วงหน้าในอีก 2 วัน";
+                                      } else {
+                                        badgeType = "future";
+                                        statusText = `⏳ เตรียมจ่ายล่วงหน้า ${diffDays} วัน`;
+                                      }
+                                    }
+
+                                    return (
+                                      <div 
+                                        key={ch.id || idx}
+                                        className={`p-4 rounded-2xl border transition-all hover:bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                          isIncoming 
+                                            ? 'bg-emerald-50/15 border-emerald-100/70 hover:border-emerald-200/90' 
+                                            : 'bg-rose-50/15 border-rose-100/70 hover:border-rose-200/90'
+                                        }`}
+                                      >
+                                        <div className="space-y-1">
+                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg ${
+                                              isIncoming 
+                                                ? 'bg-emerald-600 text-white' 
+                                                : 'bg-rose-605 text-white bg-rose-600'
+                                            }`}>
+                                              {isIncoming ? '📥 เช็ครับเงิน' : '📤 เช็คจ่ายเงิน'}
+                                            </span>
+                                            <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg" title="เลขที่เช็ค">
+                                              No. {ch.chequeNumber}
+                                            </span>
+                                            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
+                                              badgeType === 'overdue' ? 'bg-rose-50 border border-rose-200 text-rose-700 animate-pulse' :
+                                              badgeType === 'today' ? 'bg-amber-100 text-amber-800 border border-amber-300 font-extrabold' :
+                                              'bg-amber-50 border border-amber-200/50 text-amber-700'
+                                            }`}>
+                                              <span className={`w-1.5 h-1.5 rounded-full ${badgeType === 'overdue' ? 'bg-rose-500' : 'bg-amber-500'} animate-ping`}></span>
+                                              {statusText}
+                                            </span>
+                                          </div>
+                                          <h4 className="text-sm font-extrabold text-slate-900 mt-1">
+                                            {ch.bankName} • {ch.branch}
+                                          </h4>
+                                          <p className="text-[11px] font-medium text-slate-600">
+                                            <strong className="text-slate-700 font-bold">คู่สัญญา:</strong> {ch.partyName}
+                                          </p>
+                                          <p className="text-[10px] font-medium text-zinc-500 italic mt-0.5">
+                                            "{ch.note || 'ไม่มีข้อมูลบันทึกเพิ่มเติม'}"
+                                          </p>
+                                        </div>
+
+                                        <div className="text-left sm:text-right bg-white/65 p-2 rounded-xl border border-slate-100 min-w-[120px] shrink-0">
+                                          <span className="text-[10px] font-black text-slate-400 block uppercase">กำหนดขึ้นเงิน</span>
+                                          <span className="text-xs font-bold text-slate-850 block mt-0.5">{ch.chequeDate}</span>
+                                          <span className={`text-sm font-black block mt-1 ${isIncoming ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                            ฿{ch.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Footer Actions */}
+                              <div className="p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">
+                                <div className="text-left shrink-0">
+                                  <span className="text-[10px] text-slate-500 font-bold block">
+                                    Sapphire Financial Check Sweep
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 font-semibold block mt-px">
+                                    ระบบเตือนล่วงหน้า 24 ชั่วโมงเพื่อความมั่นคงและปลอดภัยทางการเงิน
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsChequeDuePopupOpen(false);
+                                      setActiveTab('cheque-incoming');
+                                    }}
+                                    className="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-750 text-white text-xs font-black transition-all cursor-pointer shadow-md text-nowrap"
+                                  >
+                                    📋 ไปหน้าจัดการข้อมูลเช็ค
+                                  </button>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsChequeDuePopupOpen(false);
+                                    }}
+                                    className="flex-1 sm:flex-none px-5 py-2.5 rounded-2xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-black transition-all cursor-pointer shadow-sm text-nowrap"
+                                  >
+                                    ❌ ปิดหน้าต่างแจ้งเตือน
+                                  </button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          </div>
+                        );
+                      })()}
                     </motion.div>
                   )}
 
@@ -1761,6 +2488,7 @@ export default function App() {
                         onAddEmployee={handleAddEmployee}
                         onUpdateEmployee={handleUpdateEmployee}
                         onDeleteEmployee={handleDeleteEmployee}
+                        companySettings={companySettings}
                       />
                     </motion.div>
                   )}
@@ -1805,7 +2533,7 @@ export default function App() {
                     </motion.div>
                   )}
 
-                  {activeTab.startsWith('sales-') && (
+                  {activeTab.startsWith('sales-') && activeTab !== 'sales-cashlog' && (
                     <motion.div
                       key="sales-view"
                       initial={{ opacity: 0, y: 10 }}
@@ -1817,6 +2545,18 @@ export default function App() {
                         activeSubTab={activeTab === 'sales-daily' ? 'daily' : activeTab === 'sales-monthly' ? 'monthly' : 'yearly'}
                         employees={employees}
                       />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'sales-cashlog' && (
+                    <motion.div
+                      key="sales-cashlog-view"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <DailyCashLogView employees={employees} />
                     </motion.div>
                   )}
 
@@ -1859,6 +2599,18 @@ export default function App() {
                     </motion.div>
                   )}
 
+                  {activeTab === 'system-installer' && (
+                    <motion.div
+                      key="installer-view"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <WebInstallerSimulator />
+                    </motion.div>
+                  )}
+
                   {activeTab.startsWith('report-sales-') && (
                     <motion.div
                       key="consolidated-reports-view"
@@ -1869,6 +2621,22 @@ export default function App() {
                     >
                       <ConsolidatedReportsView 
                         activeReportType={activeTab === 'report-sales-monthly' ? 'monthly' : 'yearly'} 
+                      />
+                    </motion.div>
+                  )}
+
+                  {(activeTab === 'accounting-tax' || activeTab === 'accounting-tax-detail' || activeTab === 'accounting-tax-transfer') && (
+                    <motion.div
+                      key={`accounting-tax-view-${activeTab}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <AccountingTaxView 
+                        employees={employees}
+                        departments={companySettings.departments}
+                        mode={activeTab === 'accounting-tax-transfer' ? 'transfer' : activeTab === 'accounting-tax-detail' ? 'detail' : 'summary'}
                       />
                     </motion.div>
                   )}
@@ -1889,6 +2657,21 @@ export default function App() {
                         onDeleteLeave={handleDeleteLeave}
                         onResetLeaveStatus={handleResetLeaveStatus}
                         onUpdateLeave={handleUpdateLeave}
+                      />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'sales-billing' && (
+                    <motion.div
+                      key="sales-billing-view"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <SalesBillingView 
+                        employees={employees}
+                        companySettings={companySettings}
                       />
                     </motion.div>
                   )}
@@ -2231,6 +3014,36 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Local JSON Backup & Web-Migration Tools */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <span className="text-[10px] font-black uppercase text-slate-405 tracking-wider">จัดการไฟล์สำรองสำหรับพกพา & ย้ายข้ามระบบเว็บอื่น (Offline JSON Backup & Migration)</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={handleExportFullBackup}
+                        className="p-3.5 rounded-2xl border border-emerald-250 bg-emerald-50/40 hover:bg-emerald-50 text-emerald-800 transition-all flex flex-col items-center justify-center text-center gap-1.5 cursor-pointer border-emerald-250/20"
+                      >
+                        <DownloadCloud className="w-6 h-6 text-emerald-600 shrink-0" />
+                        <span className="text-xs font-black">ดาวน์โหลดไฟล์สำรองทั้งหมด (JSON Backup)</span>
+                        <span className="text-[9px] text-emerald-600 font-bold">ดาวน์โหลดทั้ง 8 ตารางเก็บลงเครื่อง</span>
+                      </button>
+
+                      <label
+                        className="p-3.5 rounded-2xl border border-purple-250 bg-purple-50/40 hover:bg-purple-50 text-purple-800 transition-all flex flex-col items-center justify-center text-center gap-1.5 cursor-pointer border-purple-250/20 text-[11px] font-black"
+                      >
+                        <UploadCloud className="w-6 h-6 text-purple-600 shrink-0" />
+                        <span className="text-xs font-black">กู้คืนระบายข้อมูลจากปุ่มสำรอง (Restore Backup)</span>
+                        <span className="text-[9px] text-purple-600 font-bold">อัปโหลดไฟล์ backup เพื่อเปิดกับเว็บนี้</span>
+                        <input
+                          type="file"
+                          accept=".json"
+                          onChange={handleImportFullBackup}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
                 </>
               ) : (
                 <div className="space-y-4">
@@ -2357,15 +3170,113 @@ export default function App() {
                   ) : (
                     <>
                       {/* Table row inspector */}
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <button
-                          type="button"
-                          onClick={() => setInspectedTable(null)}
-                          className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-black flex items-center gap-1 cursor-pointer"
-                        >
-                          <ChevronLeft className="w-3.5 h-3.5" />
-                          กลับหน้าแฟ้มรวมตาราง
-                        </button>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setInspectedTable(null)}
+                            className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                            กลับหน้าแฟ้มรวมตาราง
+                          </button>
+
+                          {/* Individual Download/Upload keys */}
+                          {(() => {
+                            const localKeyMap: Record<string, string> = {
+                              employees: 'hr_employees',
+                              leave_requests: 'hr_leave_requests',
+                              daily_attendance: 'hr_daily_attendance',
+                              cheques_data: 'hr_cheques_data',
+                              daily_sales: 'sapphire_daily_sales',
+                              users: 'sapphire_users',
+                              role_permissions: 'sapphire_role_permissions',
+                              company_settings: 'hr_company_settings'
+                            };
+                            const localKey = localKeyMap[inspectedTable || ''];
+                            if (!localKey) return null;
+                            
+                            const handleExportSingleTable = () => {
+                              const raw = localStorage.getItem(localKey);
+                              if (!raw) {
+                                alert('ไม่มีข้อมูลจำเพาะตารางที่จะดาวน์โหลด');
+                                return;
+                              }
+                              const blob = new Blob([raw], { type: 'application/json' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `sapphire_table_${inspectedTable}.json`;
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              URL.revokeObjectURL(url);
+                              addSyncLog(`📥 ดาวน์โหลดเฉพาะไฟล์ตารางเดี่ยว [${inspectedTable}] สำเร็จแล้ว`);
+                            };
+
+                            const handleImportSingleTable = (event: React.ChangeEvent<HTMLInputElement>) => {
+                              const file = event.target.files?.[0];
+                              if (!file) return;
+
+                              const reader = new FileReader();
+                              reader.onload = async (e) => {
+                                const text = e.target?.result;
+                                if (typeof text !== 'string') return;
+                                try {
+                                  const data = JSON.parse(text);
+                                  if (!confirm(`❔ ต้องการเขียนข้อมูลในตาราง [${inspectedTable}] ทับด้วยไฟล์ที่คุณอัปโหลดใช่หรือไม่ข้อมูลเดิมจะหายไป?`)) {
+                                    return;
+                                  }
+                                  
+                                  localStorage.setItem(localKey, JSON.stringify(data));
+                                  addSyncLog(`📥 นำเข้าและแทนชุดข้อมูลตาราง [${inspectedTable}] สำเร็จ`);
+                                  
+                                  if (isAutoSyncEnabled) {
+                                    setCloudSyncState('syncing');
+                                    await saveKeyToCloud(inspectedTable || '', data);
+                                    addSyncLog(`   - ระบบประสานไฟล์ [${inspectedTable}] ซิงก์ขึ้น Firebase คลาวด์แล้ว`);
+                                    setCloudSyncState('success');
+                                  }
+                                  
+                                  alert(`🎉 นำเข้าและเปลี่ยนถ่ายสารสนเทศตาราง [${inspectedTable}] เรียบร้อย!`);
+                                  setReloadTrigger(prev => prev + 1);
+                                  window.dispatchEvent(new Event('sapphire_storage_updated'));
+                                } catch (err) {
+                                  alert('❌ รูปแบบไฟล์ไม่สอดคล้อง กรุณาอัปโหลดไฟล์ JSON ที่ถูกต้อง');
+                                }
+                              };
+                              reader.readAsText(file);
+                            };
+
+                            return (
+                              <div className="flex items-center gap-1.5 font-sans">
+                                <button
+                                  type="button"
+                                  onClick={handleExportSingleTable}
+                                  className="px-2.5 py-1 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all border border-emerald-200/40"
+                                  title="ดาวน์โหลดไฟล์ข้อมูล .json เพื่อนำไปอิมพอร์ตใช้งานบนเว็บอื่น"
+                                >
+                                  <DownloadCloud className="w-3.5 h-3.5" />
+                                  ดาวน์โหลดตารางนี้ (.JSON)
+                                </button>
+
+                                <label
+                                  className="px-2.5 py-1 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all border border-purple-200/40 opacity-90 hover:opacity-100"
+                                  title="นำเข้าไฟล์ข้อมูล .json เพื่อเขียนทับตารางข้อมูลเดิม"
+                                >
+                                  <UploadCloud className="w-3.5 h-3.5" />
+                                  นำเข้าเขียนทับตาราง (.JSON)
+                                  <input
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleImportSingleTable}
+                                    className="hidden"
+                                  />
+                                </label>
+                              </div>
+                            );
+                          })()}
+                        </div>
 
                         <div className="text-right">
                           <span className="text-[9px] font-mono text-indigo-600 font-bold block">Firestore Table Inspector</span>
