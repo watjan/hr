@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import JSZip from 'jszip';
 import { 
   HardDrive, 
   Folder, 
@@ -28,7 +29,8 @@ import {
   MoreVertical,
   X,
   FileCode,
-  FolderPlus
+  FolderPlus,
+  Archive
 } from 'lucide-react';
 import { 
   signInWithGoogleDrive, 
@@ -37,6 +39,25 @@ import {
   setGDriveAccessToken, 
   logoutGDrive 
 } from '../lib/gdriveAuth';
+
+const GOOGLE_WORKSPACE_MIME_TYPES: { [key: string]: { mime: string; ext: string } } = {
+  'application/vnd.google-apps.document': {
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ext: '.docx'
+  },
+  'application/vnd.google-apps.spreadsheet': {
+    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ext: '.xlsx'
+  },
+  'application/vnd.google-apps.presentation': {
+    mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ext: '.pptx'
+  },
+  'application/vnd.google-apps.drawing': {
+    mime: 'image/png',
+    ext: '.png'
+  }
+};
 
 interface DriveFile {
   id: string;
@@ -59,6 +80,11 @@ export default function GDriveView() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   
+  // ZIP generation state
+  const [isZipping, setIsZipping] = useState(false);
+  const [zipProgress, setZipProgress] = useState(0);
+  const [zipStatusText, setZipStatusText] = useState('');
+
   // Custom modals state
   const [renameModal, setRenameModal] = useState<{ isOpen: boolean; fileId: string; currentName: string; newName: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; fileId: string; fileName: string; isFolder: boolean } | null>(null);
@@ -72,6 +98,94 @@ export default function GDriveView() {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  // Download all files in current folder as a ZIP file
+  const downloadAllAsZip = async () => {
+    const token = getGDriveAccessToken();
+    if (!token) {
+      showToast('❌ โปรดเชื่อมต่อ Google Drive ก่อนใช้งาน', 'error');
+      return;
+    }
+
+    // Filter out folders from downloading
+    const filesToDownload = filteredFiles.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+
+    if (filesToDownload.length === 0) {
+      showToast('⚠️ ไม่พบไฟล์ใด ๆ ในโฟลเดอร์นี้ที่สามารถดาวน์โหลดได้', 'info');
+      return;
+    }
+
+    setIsZipping(true);
+    setZipProgress(0);
+    setZipStatusText('กำลังเตรียมการดาวน์โหลดเอกสาร...');
+
+    try {
+      const zip = new JSZip();
+      
+      for (let i = 0; i < filesToDownload.length; i++) {
+        const file = filesToDownload[i];
+        setZipStatusText(`กำลังดึงไฟล์ (${i + 1}/${filesToDownload.length}): ${file.name}`);
+        setZipProgress(Math.round((i / filesToDownload.length) * 100));
+
+        const isWorkspaceType = file.mimeType in GOOGLE_WORKSPACE_MIME_TYPES;
+        let url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+        let resolvedName = file.name;
+
+        if (isWorkspaceType) {
+          const exportInfo = GOOGLE_WORKSPACE_MIME_TYPES[file.mimeType];
+          url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportInfo.mime)}`;
+          if (!resolvedName.toLowerCase().endsWith(exportInfo.ext)) {
+            resolvedName += exportInfo.ext;
+          }
+        }
+
+        try {
+          const response = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to download ${file.name}`);
+          }
+
+          const blob = await response.blob();
+          zip.file(resolvedName, blob);
+        } catch (fileErr) {
+          console.error(`Error downloading file ${file.name}:`, fileErr);
+          // Continue with other files but we can show warning
+        }
+      }
+
+      setZipStatusText('กำลังบีบอัดและรวมไฟล์เป็น ZIP Archive...');
+      setZipProgress(95);
+
+      const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+        setZipProgress(95 + Math.round((metadata.percent || 0) * 0.05));
+      });
+
+      // Trigger automatic browser download
+      const zipUrl = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = zipUrl;
+      const folderName = currentFolder[currentFolder.length - 1]?.name || 'drive_export';
+      link.download = `${folderName}_files_${new Date().toISOString().slice(0,10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(zipUrl);
+
+      showToast('📦 ดาวน์โหลดและสร้างไฟล์ ZIP ทั้งหมดเรียบร้อยแล้ว', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('❌ ไม่สามารถดาวน์โหลดหรือรวมไฟล์ ZIP ได้', 'error');
+    } finally {
+      setIsZipping(false);
+      setZipProgress(0);
+      setZipStatusText('');
+    }
   };
 
   // Initialize and check Auth State
@@ -503,6 +617,15 @@ export default function GDriveView() {
               </button>
 
               <button
+                onClick={downloadAllAsZip}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-400 hover:bg-amber-600 hover:text-white transition-all text-xs font-bold cursor-pointer"
+                title="ดาวน์โหลดไฟล์ทั้งหมดในโฟลเดอร์นี้เป็นไฟล์ ZIP เพื่อย้ายไปเว็บอื่น"
+              >
+                <Archive className="w-4 h-4" />
+                ดาวน์โหลด ZIP ทั้งหมด
+              </button>
+
+              <button
                 onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-all text-xs font-bold shadow-md shadow-blue-500/10 cursor-pointer"
               >
@@ -654,6 +777,28 @@ export default function GDriveView() {
           <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
           <h4 className="text-white text-sm font-bold">กำลังอัปโหลดไฟล์สู่ Google Drive...</h4>
           <p className="text-slate-400 text-xs mt-1">โปรดอย่าปิดหน้านี้ขณะทำการส่งไฟล์</p>
+        </div>
+      )}
+
+      {/* Zipping/Downloading progress bar overlay */}
+      {isZipping && (
+        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-xs rounded-3xl flex flex-col items-center justify-center z-40 p-6">
+          <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center mb-4">
+            <Archive className="w-8 h-8 animate-pulse" />
+          </div>
+          <h4 className="text-white text-sm font-bold text-center px-4 max-w-md">{zipStatusText}</h4>
+          
+          <div className="w-64 bg-slate-800 h-2.5 rounded-full overflow-hidden mt-4 border border-slate-700">
+            <div 
+              className="bg-amber-500 h-full rounded-full transition-all duration-300 shadow-lg shadow-amber-500/20" 
+              style={{ width: `${zipProgress}%` }}
+            />
+          </div>
+          <span className="text-amber-400 text-xs font-mono font-bold mt-2">{zipProgress}%</span>
+          
+          <p className="text-slate-400 text-[10px] mt-4 max-w-xs text-center leading-relaxed">
+            ระบบกำลังดาวน์โหลดและบีบอัดไฟล์ทั้งหมดเป็นไฟล์ ZIP เพื่อช่วยให้คุณสามารถนำข้อมูลไปใช้งานบนระบบอื่นได้อย่างง่ายดาย
+          </p>
         </div>
       )}
 
