@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Building2, 
@@ -39,6 +39,22 @@ export default function CompanySettingsView({
   // Local state for core company updates
   const [editableSettings, setEditableSettings] = useState<CompanySettings>({ ...settings });
   const [isEditingCompany, setIsEditingCompany] = useState(false);
+  
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
   
   // Firebase Sync State variables
   const [isSyncing, setIsSyncing] = useState(false);
@@ -106,6 +122,7 @@ export default function CompanySettingsView({
     e.preventDefault();
     onUpdateSettings(editableSettings);
     setIsEditingCompany(false);
+    showToast('💾 บันทึกการตั้งค่าบริษัทเรียบร้อยแล้ว!', 'success');
   };
 
   // Backup current localStorage states to a JSON download file
@@ -163,6 +180,7 @@ export default function CompanySettingsView({
       setEditableSettings(newSettings);
       onUpdateSettings(newSettings);
       setDeptToDelete(null);
+      showToast('🗑️ ลบข้อมูลแผนกเรียบร้อยแล้ว!', 'success');
     }
   };
 
@@ -198,6 +216,7 @@ export default function CompanySettingsView({
     setEditableSettings(newSettings);
     onUpdateSettings(newSettings);
     setIsDeptModalOpen(false);
+    showToast(editingDept ? '✏️ อัปเดตข้อมูลแผนกเรียบร้อยแล้ว!' : '➕ เพิ่มแผนกใหม่เรียบร้อยแล้ว!', 'success');
   };
 
   return (
@@ -720,6 +739,37 @@ export default function CompanySettingsView({
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            id="company-settings-toast"
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+            className="fixed bottom-5 right-5 z-[100] flex items-center gap-3 bg-slate-900 text-white px-4 py-3.5 rounded-2xl shadow-2xl border border-slate-800 max-w-sm"
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+              toast.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' :
+              toast.type === 'error' ? 'bg-rose-500/20 text-rose-400' :
+              'bg-blue-500/20 text-blue-400'
+            }`}>
+              {toast.type === 'success' ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-slate-100">{toast.message}</p>
+            </div>
+            <button
+              onClick={() => setToast(null)}
+              className="text-slate-500 hover:text-slate-300 p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
