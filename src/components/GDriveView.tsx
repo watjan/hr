@@ -100,41 +100,55 @@ export default function GDriveView() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Download all files in current folder as a ZIP file
-  const downloadAllAsZip = async () => {
-    const token = getGDriveAccessToken();
-    if (!token) {
-      showToast('❌ โปรดเชื่อมต่อ Google Drive ก่อนใช้งาน', 'error');
-      return;
-    }
+  // Fetch all files in a folder including subfolders recursively (supporting pagination)
+  const fetchAllFilesInFolder = async (folderId: string, token: string): Promise<DriveFile[]> => {
+    let filesList: DriveFile[] = [];
+    let nextPageToken: string | undefined = undefined;
+    do {
+      const q = `'${folderId}' in parents and trashed = false`;
+      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id, name, mimeType, size, modifiedTime, iconLink, webViewLink)&orderBy=folder,name&pageSize=1000${nextPageToken ? `&pageToken=${nextPageToken}` : ''}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to fetch items in folder ${folderId}`);
+      }
+      const data = await res.json();
+      filesList = [...filesList, ...(data.files || [])];
+      nextPageToken = data.nextPageToken;
+    } while (nextPageToken);
+    return filesList;
+  };
 
-    // Filter out folders from downloading
-    const filesToDownload = filteredFiles.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+  // Recursively download files and folders and insert them into JSZip
+  const downloadFolderRecursive = async (
+    folderId: string,
+    zipInstance: JSZip,
+    currentPath: string,
+    token: string,
+    onProgress: (statusText: string) => void
+  ) => {
+    const items = await fetchAllFilesInFolder(folderId, token);
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const itemPath = currentPath ? `${currentPath}/${item.name}` : item.name;
 
-    if (filesToDownload.length === 0) {
-      showToast('⚠️ ไม่พบไฟล์ใด ๆ ในโฟลเดอร์นี้ที่สามารถดาวน์โหลดได้', 'info');
-      return;
-    }
-
-    setIsZipping(true);
-    setZipProgress(0);
-    setZipStatusText('กำลังเตรียมการดาวน์โหลดเอกสาร...');
-
-    try {
-      const zip = new JSZip();
-      
-      for (let i = 0; i < filesToDownload.length; i++) {
-        const file = filesToDownload[i];
-        setZipStatusText(`กำลังดึงไฟล์ (${i + 1}/${filesToDownload.length}): ${file.name}`);
-        setZipProgress(Math.round((i / filesToDownload.length) * 100));
-
-        const isWorkspaceType = file.mimeType in GOOGLE_WORKSPACE_MIME_TYPES;
-        let url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-        let resolvedName = file.name;
+      if (item.mimeType === 'application/vnd.google-apps.folder') {
+        const folderZip = zipInstance.folder(item.name);
+        if (folderZip) {
+          onProgress(`กำลังเข้าสู่โฟลเดอร์: ${itemPath}`);
+          await downloadFolderRecursive(item.id, folderZip, itemPath, token, onProgress);
+        }
+      } else {
+        onProgress(`กำลังดาวน์โหลดไฟล์: ${itemPath}`);
+        const isWorkspaceType = item.mimeType in GOOGLE_WORKSPACE_MIME_TYPES;
+        let url = `https://www.googleapis.com/drive/v3/files/${item.id}?alt=media`;
+        let resolvedName = item.name;
 
         if (isWorkspaceType) {
-          const exportInfo = GOOGLE_WORKSPACE_MIME_TYPES[file.mimeType];
-          url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportInfo.mime)}`;
+          const exportInfo = GOOGLE_WORKSPACE_MIME_TYPES[item.mimeType];
+          url = `https://www.googleapis.com/drive/v3/files/${item.id}/export?mimeType=${encodeURIComponent(exportInfo.mime)}`;
           if (!resolvedName.toLowerCase().endsWith(exportInfo.ext)) {
             resolvedName += exportInfo.ext;
           }
@@ -142,24 +156,47 @@ export default function GDriveView() {
 
         try {
           const response = await fetch(url, {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
+            headers: { Authorization: `Bearer ${token}` }
           });
-
-          if (!response.ok) {
-            throw new Error(`Failed to download ${file.name}`);
+          if (response.ok) {
+            const blob = await response.blob();
+            zipInstance.file(resolvedName, blob);
+          } else {
+            console.error(`Failed to download ${item.name}: ${response.status}`);
           }
-
-          const blob = await response.blob();
-          zip.file(resolvedName, blob);
-        } catch (fileErr) {
-          console.error(`Error downloading file ${file.name}:`, fileErr);
-          // Continue with other files but we can show warning
+        } catch (err) {
+          console.error(`Failed to fetch file ${item.name}:`, err);
         }
       }
+    }
+  };
 
-      setZipStatusText('กำลังบีบอัดและรวมไฟล์เป็น ZIP Archive...');
+  // Download any folder and its nested items recursively as a ZIP file
+  const downloadFolderAsZip = async (folderId: string, folderName: string) => {
+    const token = getGDriveAccessToken();
+    if (!token) {
+      showToast('❌ โปรดเชื่อมต่อ Google Drive ก่อนใช้งาน', 'error');
+      return;
+    }
+
+    setIsZipping(true);
+    setZipProgress(5);
+    setZipStatusText(`กำลังสแกนโครงสร้างโฟลเดอร์ "${folderName}"...`);
+
+    try {
+      const zip = new JSZip();
+      let filesCount = 0;
+      
+      const onProgress = (statusText: string) => {
+        filesCount++;
+        setZipStatusText(statusText);
+        // Slowly increase progress up to 90%
+        setZipProgress(Math.min(90, 5 + filesCount * 2));
+      };
+
+      await downloadFolderRecursive(folderId, zip, '', token, onProgress);
+
+      setZipStatusText('กำลังบีบอัดและรวบรวมไฟล์ทั้งหมดเป็น ZIP Archive...');
       setZipProgress(95);
 
       const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
@@ -170,14 +207,13 @@ export default function GDriveView() {
       const zipUrl = URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = zipUrl;
-      const folderName = currentFolder[currentFolder.length - 1]?.name || 'drive_export';
-      link.download = `${folderName}_files_${new Date().toISOString().slice(0,10)}.zip`;
+      link.download = `${folderName}_backup_${new Date().toISOString().slice(0,10)}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(zipUrl);
 
-      showToast('📦 ดาวน์โหลดและสร้างไฟล์ ZIP ทั้งหมดเรียบร้อยแล้ว', 'success');
+      showToast(`📦 ดาวน์โหลดโฟลเดอร์ "${folderName}" ในรูปแบบ ZIP สำเร็จแล้ว`, 'success');
     } catch (err) {
       console.error(err);
       showToast('❌ ไม่สามารถดาวน์โหลดหรือรวมไฟล์ ZIP ได้', 'error');
@@ -186,6 +222,12 @@ export default function GDriveView() {
       setZipProgress(0);
       setZipStatusText('');
     }
+  };
+
+  // Download all files and folders in current directory recursively as a ZIP file
+  const downloadAllAsZip = async () => {
+    const folderName = currentFolder[currentFolder.length - 1]?.name || 'gdrive_root';
+    await downloadFolderAsZip(activeFolderId, folderName);
   };
 
   // Initialize and check Auth State
@@ -733,6 +775,15 @@ export default function GDriveView() {
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                              {isFolder && (
+                                <button
+                                  onClick={() => downloadFolderAsZip(file.id, file.name)}
+                                  className="p-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 text-amber-400 hover:text-white hover:bg-amber-600 transition-colors cursor-pointer"
+                                  title="ดาวน์โหลดโฟลเดอร์นี้และไฟล์ข้างในทั้งหมดเป็น ZIP"
+                                >
+                                  <Archive className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               {!isFolder && file.webViewLink && (
                                 <a
                                   href={file.webViewLink}
