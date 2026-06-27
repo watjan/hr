@@ -37,7 +37,8 @@ import {
   FileSpreadsheet,
   UserCheck,
   ExternalLink,
-  Truck
+  Truck,
+  HardDrive
 } from 'lucide-react';
 
 // Types and mock data
@@ -69,6 +70,7 @@ import AccountingTaxView from './components/AccountingTaxView';
 import SalesBillingView from './components/SalesBillingView';
 import WebInstallerSimulator from './components/WebInstallerSimulator';
 import SuppliersView from './components/SuppliersView';
+import GDriveView from './components/GDriveView';
 import { 
   testConnection, 
   saveKeyToCloud, 
@@ -922,7 +924,7 @@ export default function App() {
     }
     
     // Always allow basic dashboard & users tab so everyone can manage/view accounts
-    if (targetTab === 'dashboard' || targetTab === 'users' || targetTab === 'system-installer') return true;
+    if (targetTab === 'dashboard' || targetTab === 'users' || targetTab === 'system-installer' || targetTab === 'gdrive') return true;
     
     // Allow sales-billing for admin, sales, accountant
     if (targetTab === 'sales-billing') {
@@ -1355,7 +1357,25 @@ export default function App() {
                 }`}
               >
                 <Server className="w-4.5 h-4.5 text-blue-400 animate-pulse" />
-                9. โปรแกรมจำลองการติดตั้งระบบ
+                <span>9. โปรแกรมจำลองการติดตั้งระบบ</span>
+              </button>
+            </div>
+          )}
+
+          {/* Item 10: Google Drive Storage */}
+          {isTabAllowed('gdrive') && (
+            <div className="border-t border-white/5 pt-2 mt-2">
+              <button
+                id="tab-gdrive-btn"
+                onClick={() => setActiveTab('gdrive')}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+                  activeTab === 'gdrive'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-300 hover:text-white hover:bg-white/10 shrink-0'
+                }`}
+              >
+                <HardDrive className="w-4.5 h-4.5 text-cyan-400" />
+                <span>10. ระบบคลังเอกสาร Google Drive</span>
               </button>
             </div>
           )}
@@ -1865,6 +1885,18 @@ export default function App() {
               </div>
             )}
 
+            {/* Mobile Google Drive tab */}
+            {isTabAllowed('gdrive') && (
+              <div className="pt-2 border-t border-white/10 mt-1">
+                <button
+                  onClick={() => { setActiveTab('gdrive'); setIsMobileMenuOpen(false); }}
+                  className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold text-white ${activeTab === 'gdrive' ? 'bg-blue-600' : 'bg-white/5'}`}
+                >
+                  <HardDrive className="w-4 h-4 text-cyan-400" /> 10. ระบบคลังเอกสาร Google Drive
+                </button>
+              </div>
+            )}
+
             {/* Mobile collapsible Reports menu */}
             {(isTabAllowed('report-sales-monthly') || isTabAllowed('report-sales-yearly')) && (
               <div className="pt-2 border-t border-white/10 mt-1">
@@ -1996,6 +2028,7 @@ export default function App() {
                   {activeTab === 'users' && 'ทะเบียนบริหารจัดการบัญชีผู้ใช้งาน (User Accounts Control Panel)'}
                   {activeTab === 'suppliers' && 'ระบบบริหารจัดการฐานข้อมูลคู่ค้าและประวัติการส่งของ (Suppliers & Delivery Partners)'}
                   {activeTab === 'system-installer' && 'โปรแกรมจำลองการตั้งค่าโครงสร้างและติดตั้งระบบ (Web Setup Installer Simulator)'}
+                  {activeTab === 'gdrive' && 'ระบบคลังเอกสารและไฟล์บน Google Drive (Cloud Storage Management)'}
                   {activeTab === 'report-sales-monthly' && 'บริหารรวมรายงานทั้งหมด: รายงานสรุปยอดขายรายเดือนสุทธิสะสม (Consolidated Monthly Sales)'}
                   {activeTab === 'report-sales-yearly' && 'บริหารรวมรายงานทั้งหมด: รายงานสรุปยอดขายรายปีอ้างอิงเป้าหมาย (Consolidated Yearly Sales)'}
                   {activeTab === 'accounting-tax' && 'ระบบบัญชีและยอดส่งภาษีสรรพากร (Tax & Payroll Accounting Panel)'}
@@ -2658,6 +2691,18 @@ export default function App() {
                       transition={{ duration: 0.15 }}
                     >
                       <WebInstallerSimulator />
+                    </motion.div>
+                  )}
+
+                  {activeTab === 'gdrive' && (
+                    <motion.div
+                      key="gdrive-view"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <GDriveView />
                     </motion.div>
                   )}
 
